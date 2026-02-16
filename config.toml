@@ -11,6 +11,25 @@ rotation_lerp_speed = 3.0
 # Delay in seconds before repeating movement input when button is held
 input_repeat_delay = 0.15
 
+[camera]
+# Look mode: "relative" (follows mouse movement) or "absolute" (looks at cursor position)
+look_mode = "relative"
+
+# Mouse sensitivity for looking (pixels per degree) - used in relative mode
+mouse_sensitivity = 0.15
+
+# Maximum horizontal look angle in degrees (left/right)
+max_look_horizontal = 80.0
+
+# Maximum upward look angle in degrees
+max_look_up = 90.0
+
+# Maximum downward look angle in degrees
+max_look_down = 45.0
+
+# Speed of lerping look back to forward (radians per second)
+look_lerp_speed = 8.0
+
 [movement]
 # Input polling frequency - how often to check for player input (affects responsiveness)
 # This is just a reference value; actual movement happens in the Update system

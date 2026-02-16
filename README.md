@@ -8,10 +8,11 @@ A grid-based maze game built with Bevy.
 cargo run
 ```
 
-The game reads configuration from `config.toml` at startup. Adjust movement speed, rotation speed, and input delay there as needed.
+The game reads configuration from `config.toml` at startup. Adjust movement speed, rotation speed, input delay, and camera settings there as needed.
 
 ## Controls
 
+### Movement & Rotation
 | Key | Action |
 |-----|--------|
 | **W** | Move forward |
@@ -22,3 +23,13 @@ The game reads configuration from `config.toml` at startup. Adjust movement spee
 | **E** | Rotate right (90°) |
 
 Movement is grid-based and relative to your facing direction. Hold a key to repeat movement every `input_repeat_delay` seconds (configurable in `config.toml`).
+
+### Camera
+| Key | Action |
+|-----|--------|
+| **TAB** | Hold to enable mouse look |
+| **M** | Toggle camera look mode (relative ↔ absolute) |
+
+**Look Modes:**
+- **Relative**: Mouse movement controls camera look (default)
+- **Absolute**: Cursor position controls where you look

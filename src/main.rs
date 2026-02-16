@@ -1,6 +1,20 @@
 use bevy::prelude::*;
+use bevy::input::mouse::MouseMotion;
+use bevy::ecs::message::MessageReader;
+use bevy::window::PrimaryWindow;
+use bevy::ui::{Node, PositionType, Val};
 use serde::Deserialize;
 use std::fs;
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "lowercase")]
+enum LookMode {
+    Relative,
+    Absolute,
+}
+
+#[derive(Resource, Clone, Debug)]
+struct CameraLookMode(LookMode);
 
 #[derive(Deserialize, Clone)]
 struct PlayerConfig {
@@ -10,9 +24,20 @@ struct PlayerConfig {
     input_repeat_delay: f32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
+struct CameraConfig {
+    look_mode: LookMode,
+    mouse_sensitivity: f32,
+    max_look_horizontal: f32,
+    max_look_up: f32,
+    max_look_down: f32,
+    look_lerp_speed: f32,
+}
+
+#[derive(Deserialize, Clone)]
 struct GameConfig {
     player: PlayerConfig,
+    camera: CameraConfig,
 }
 
 impl Resource for GameConfig {}
@@ -27,9 +52,12 @@ fn main() {
 
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(config)
+        .insert_resource(config.clone())
+        .insert_resource(CameraLookMode(config.camera.look_mode.clone()))
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_player_input, update_lerp_movement, update_lerp_rotation))
+        .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
+        .add_systems(Update, update_debug_text)
         .run();
 }
 
@@ -59,6 +87,21 @@ struct InputRepeatTimer {
     /// Tracks time since last rotation input
     rotation_timer: f32,
 }
+
+#[derive(Component)]
+struct CameraLook {
+    /// Current horizontal look angle in radians (positive = right, negative = left)
+    yaw: f32,
+    /// Current vertical look angle in radians (positive = up, negative = down)
+    pitch: f32,
+    /// Target horizontal look angle we're lerping towards
+    target_yaw: f32,
+    /// Target vertical look angle we're lerping towards
+    target_pitch: f32,
+}
+
+#[derive(Component)]
+struct DebugText;
 
 /// set up a simple 3D scene
 fn setup(
@@ -107,9 +150,32 @@ fn setup(
     )).with_children(|parent| {
         parent.spawn((
             Camera3d::default(),
+            CameraLook {
+                yaw: 0.0,
+                pitch: 0.0,
+                target_yaw: 0.0,
+                target_pitch: 0.0,
+            },
             Transform::IDENTITY.looking_at(Vec3::ZERO, Vec3::Y),
         ));
     });
+
+    // Debug text UI
+    commands.spawn((
+        Text::new(""),
+        TextColor(Color::srgb(0.0, 1.0, 0.0)),
+        TextFont {
+            font_size: 16.0,
+            ..default()
+        },
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(10.0),
+            left: Val::Px(10.0),
+            ..default()
+        },
+        DebugText,
+    ));
 }
 
 fn handle_player_input(
@@ -238,4 +304,225 @@ fn update_lerp_rotation(
             transform.rotation = rot.target_rotation;
         }
     }
+}
+
+fn handle_camera_look(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    config: Res<GameConfig>,
+    look_mode: Res<CameraLookMode>,
+    mouse_motion: MessageReader<MouseMotion>,
+    camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
+    cursor_query: Query<&Window, With<PrimaryWindow>>,
+) {
+    match &look_mode.0 {
+        LookMode::Relative => {
+            handle_camera_look_relative(
+                keyboard_input,
+                config,
+                mouse_motion,
+                camera_query,
+            );
+        }
+        LookMode::Absolute => {
+            handle_camera_look_absolute(
+                keyboard_input,
+                config,
+                camera_query,
+                cursor_query,
+            );
+        }
+    }
+}
+
+fn toggle_camera_look_mode(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut look_mode: ResMut<CameraLookMode>,
+) {
+    if keyboard_input.just_pressed(KeyCode::KeyM) {
+        look_mode.0 = match look_mode.0 {
+            LookMode::Relative => LookMode::Absolute,
+            LookMode::Absolute => LookMode::Relative,
+        };
+    }
+}
+
+fn handle_camera_look_relative(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    config: Res<GameConfig>,
+    mut mouse_motion: MessageReader<MouseMotion>,
+    mut camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
+) {
+    let mouse_sensitivity = config.camera.mouse_sensitivity;
+    let max_horizontal = config.camera.max_look_horizontal.to_radians();
+    let max_up = config.camera.max_look_up.to_radians();
+    let max_down = config.camera.max_look_down.to_radians();
+
+    // Check if look key (Tab) is pressed
+    let is_looking = keyboard_input.pressed(KeyCode::Tab);
+
+    // Accumulate mouse motion
+    let mut total_delta = Vec2::ZERO;
+    for event in mouse_motion.read() {
+        total_delta += event.delta;
+    }
+
+    for (mut transform, mut camera_look) in &mut camera_query {
+        if is_looking {
+            // Only update target angles if Tab is held
+            if total_delta != Vec2::ZERO {
+                let yaw_delta = -total_delta.x * mouse_sensitivity * 0.01;
+                let pitch_delta = -total_delta.y * mouse_sensitivity * 0.01;
+
+                camera_look.target_yaw += yaw_delta;
+                camera_look.target_pitch += pitch_delta;
+
+                // Clamp horizontal look (yaw)
+                camera_look.target_yaw = camera_look.target_yaw.clamp(-max_horizontal, max_horizontal);
+
+                // Clamp vertical look (pitch)
+                camera_look.target_pitch = camera_look.target_pitch.clamp(-max_down, max_up);
+            }
+        } else {
+            // Tab not held - start returning to center
+            camera_look.target_yaw = 0.0;
+            camera_look.target_pitch = 0.0;
+        }
+
+        // Build rotation from yaw and pitch
+        let yaw_quat = Quat::from_rotation_y(camera_look.yaw);
+        let pitch_quat = Quat::from_rotation_x(camera_look.pitch);
+
+        // Combine rotations: yaw first, then pitch
+        transform.rotation = yaw_quat * pitch_quat;
+    }
+}
+
+fn handle_camera_look_absolute(
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    config: Res<GameConfig>,
+    mut camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
+    cursor_query: Query<&Window, With<PrimaryWindow>>,
+) {
+    let max_horizontal = config.camera.max_look_horizontal.to_radians();
+    let max_up = config.camera.max_look_up.to_radians();
+    let max_down = config.camera.max_look_down.to_radians();
+
+    // Check if look key (Tab) is pressed
+    let is_looking = keyboard_input.pressed(KeyCode::Tab);
+
+    let window = cursor_query.single().ok();
+    let cursor_position = window.and_then(|w: &Window| w.cursor_position());
+
+    for (mut transform, mut camera_look) in &mut camera_query {
+        if is_looking {
+            if let Some(cursor_pos) = cursor_position {
+                if let Some(window) = window {
+                    let window_size = Vec2::new(window.resolution.width(), window.resolution.height());
+                    let center = window_size / 2.0;
+
+                    // Normalize cursor position relative to center
+                    let cursor_offset = cursor_pos - center;
+
+                    // Map to angle range
+                    // Horizontal: map from [-width/2, width/2] to [-max_horizontal, max_horizontal]
+                    camera_look.target_yaw = -(cursor_offset.x / (window_size.x / 2.0)) * max_horizontal;
+
+                    // Vertical: map from [-height/2, height/2] to [-max_down, max_up]
+                    // (inverted because screen y increases downward)
+                    let normalized_y = cursor_offset.y / (window_size.y / 2.0);
+                    if normalized_y > 0.0 {
+                        // Looking down
+                        camera_look.target_pitch = -normalized_y * max_down;
+                    } else {
+                        // Looking up
+                        camera_look.target_pitch = -normalized_y * max_up;
+                    }
+
+                    // Clamp to ensure we don't exceed bounds
+                    camera_look.target_yaw = camera_look.target_yaw.clamp(-max_horizontal, max_horizontal);
+                    camera_look.target_pitch = camera_look.target_pitch.clamp(-max_down, max_up);
+                }
+            }
+        } else {
+            // Tab not held - return to center
+            camera_look.target_yaw = 0.0;
+            camera_look.target_pitch = 0.0;
+        }
+
+        // Build rotation from yaw and pitch
+        let yaw_quat = Quat::from_rotation_y(camera_look.yaw);
+        let pitch_quat = Quat::from_rotation_x(camera_look.pitch);
+
+        // Combine rotations: yaw first, then pitch
+        transform.rotation = yaw_quat * pitch_quat;
+    }
+}
+
+fn update_camera_look_lerp(
+    time: Res<Time>,
+    config: Res<GameConfig>,
+    mut camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
+) {
+    let look_lerp_speed = config.camera.look_lerp_speed;
+    let delta_time = time.delta_secs();
+
+    for (mut transform, mut camera_look) in &mut camera_query {
+        // Smoothly lerp towards target angles
+        let lerp_factor = (look_lerp_speed * delta_time).min(1.0);
+        camera_look.yaw = camera_look.yaw.lerp(camera_look.target_yaw, lerp_factor);
+        camera_look.pitch = camera_look.pitch.lerp(camera_look.target_pitch, lerp_factor);
+
+        // Update rotation
+        let yaw_quat = Quat::from_rotation_y(camera_look.yaw);
+        let pitch_quat = Quat::from_rotation_x(camera_look.pitch);
+        transform.rotation = yaw_quat * pitch_quat;
+    }
+}
+
+fn update_debug_text(
+    player_query: Query<&Transform, With<Player>>,
+    camera_query: Query<(&Transform, &CameraLook), With<Camera3d>>,
+    look_mode: Res<CameraLookMode>,
+    mut debug_text_query: Query<&mut Text, With<DebugText>>,
+) {
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+
+    let Ok((_camera_transform, camera_look)) = camera_query.single() else {
+        return;
+    };
+
+    let mut debug_text = match debug_text_query.single_mut() {
+        Ok(text) => text,
+        Err(_) => return,
+    };
+
+    let pos = player_transform.translation;
+    let rot = player_transform.rotation;
+    let euler = rot.to_euler(bevy::math::EulerRot::YXZ);
+    
+    let look_mode_str = match look_mode.0 {
+        LookMode::Relative => "Relative",
+        LookMode::Absolute => "Absolute",
+    };
+
+    debug_text.0 = format!(
+        "CONTROLS:\n\
+         WASD - Move | QE - Rotate | TAB - Look | M - Toggle Look Mode\n\
+         \n\
+         LOOK MODE: {}\n\
+         \n\
+         PLAYER:\n\
+         Pos: ({:.2}, {:.2}, {:.2})\n\
+         Rot: ({:.2}, {:.2}, {:.2})\n\
+         \n\
+         CAMERA:\n\
+         Yaw: {:.2} degrees | Pitch: {:.2} degrees",
+        look_mode_str,
+        pos.x, pos.y, pos.z,
+        euler.0.to_degrees(), euler.1.to_degrees(), euler.2.to_degrees(),
+        (camera_look.yaw).to_degrees(),
+        (camera_look.pitch).to_degrees(),
+    );
 }
