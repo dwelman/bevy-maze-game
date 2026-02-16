@@ -1,0 +1,17 @@
+[player]
+# Grid unit size - each movement step moves by this amount
+grid_unit = 1.0
+
+# Speed of lerping from current position to next grid position (units per second)
+lerp_speed = 10.0
+
+# Speed of lerping rotation (radians per second)
+rotation_lerp_speed = 3.0
+
+# Delay in seconds before repeating movement input when button is held
+input_repeat_delay = 0.15
+
+[movement]
+# Input polling frequency - how often to check for player input (affects responsiveness)
+# This is just a reference value; actual movement happens in the Update system
+input_poll_rate = 60
