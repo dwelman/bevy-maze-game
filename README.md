@@ -22,7 +22,7 @@ The game reads configuration from `config.toml` at startup. Adjust movement spee
 | **Q** | Rotate left (90°) |
 | **E** | Rotate right (90°) |
 
-Movement is grid-based and relative to your facing direction. Hold a key to repeat movement every `input_repeat_delay` seconds (configurable in `config.toml`).
+Movement is grid-based and relative to your facing direction. Hold a key to repeat movement every `input_repeat_delay` seconds (configurable in `config.toml`). The movement and rotation keys are configurable under the `[controls]` section in `config.toml`.
 
 ### Camera
 | Key | Action |
@@ -33,3 +33,5 @@ Movement is grid-based and relative to your facing direction. Hold a key to repe
 **Look Modes:**
 - **Relative**: Mouse movement controls camera look (default)
 - **Absolute**: Cursor position controls where you look
+
+Camera keys are configurable under the `[controls]` section in `config.toml`.

@@ -30,6 +30,17 @@ max_look_down = 45.0
 # Speed of lerping look back to forward (radians per second)
 look_lerp_speed = 8.0
 
+[controls]
+# Use W/A/S/D, Q/E, Tab, M, Arrow keys, or PageUp/PageDown
+move_forward = "W"
+move_backward = "S"
+move_left = "A"
+move_right = "D"
+rotate_left = "Q"
+rotate_right = "E"
+look_hold = "Tab"
+look_mode_toggle = "M"
+
 [movement]
 # Input polling frequency - how often to check for player input (affects responsiveness)
 # This is just a reference value; actual movement happens in the Update system

@@ -35,12 +35,80 @@ struct CameraConfig {
 }
 
 #[derive(Deserialize, Clone)]
+struct ControlsConfig {
+    move_forward: String,
+    move_backward: String,
+    move_left: String,
+    move_right: String,
+    rotate_left: String,
+    rotate_right: String,
+    look_hold: String,
+    look_mode_toggle: String,
+}
+
+#[derive(Deserialize, Clone)]
 struct GameConfig {
     player: PlayerConfig,
     camera: CameraConfig,
+    controls: ControlsConfig,
 }
 
 impl Resource for GameConfig {}
+
+#[derive(Resource, Clone)]
+struct Controls {
+    move_forward: KeyCode,
+    move_backward: KeyCode,
+    move_left: KeyCode,
+    move_right: KeyCode,
+    rotate_left: KeyCode,
+    rotate_right: KeyCode,
+    look_hold: KeyCode,
+    look_mode_toggle: KeyCode,
+}
+
+impl Controls {
+    fn from_config(config: &ControlsConfig) -> Result<Self, String> {
+        Ok(Self {
+            move_forward: parse_keycode(&config.move_forward)?,
+            move_backward: parse_keycode(&config.move_backward)?,
+            move_left: parse_keycode(&config.move_left)?,
+            move_right: parse_keycode(&config.move_right)?,
+            rotate_left: parse_keycode(&config.rotate_left)?,
+            rotate_right: parse_keycode(&config.rotate_right)?,
+            look_hold: parse_keycode(&config.look_hold)?,
+            look_mode_toggle: parse_keycode(&config.look_mode_toggle)?,
+        })
+    }
+}
+
+fn parse_keycode(value: &str) -> Result<KeyCode, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let key = match normalized.as_str() {
+        "w" | "keyw" | "key_w" => KeyCode::KeyW,
+        "a" | "keya" | "key_a" => KeyCode::KeyA,
+        "s" | "keys" | "key_s" => KeyCode::KeyS,
+        "d" | "keyd" | "key_d" => KeyCode::KeyD,
+        "q" | "keyq" | "key_q" => KeyCode::KeyQ,
+        "e" | "keye" | "key_e" => KeyCode::KeyE,
+        "m" | "keym" | "key_m" => KeyCode::KeyM,
+        "tab" => KeyCode::Tab,
+        "arrowup" | "arrow_up" | "up" => KeyCode::ArrowUp,
+        "arrowdown" | "arrow_down" | "down" => KeyCode::ArrowDown,
+        "arrowleft" | "arrow_left" | "left" => KeyCode::ArrowLeft,
+        "arrowright" | "arrow_right" | "right" => KeyCode::ArrowRight,
+        "pageup" | "page_up" => KeyCode::PageUp,
+        "pagedown" | "page_down" => KeyCode::PageDown,
+        _ => {
+            return Err(format!(
+                "Unsupported key '{}'. Use W/A/S/D, Q/E, Tab, M, Arrow keys, or PageUp/PageDown.",
+                value
+            ));
+        }
+    };
+
+    Ok(key)
+}
 
 fn main() {
     // Load config
@@ -50,9 +118,13 @@ fn main() {
     let config: GameConfig = toml::from_str(&config_str)
         .expect("Failed to parse config file");
 
+    let controls = Controls::from_config(&config.controls)
+        .unwrap_or_else(|err| panic!("Invalid controls in config.toml: {}", err));
+
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(config.clone())
+        .insert_resource(controls)
         .insert_resource(CameraLookMode(config.camera.look_mode.clone()))
         .add_systems(Startup, setup)
         .add_systems(Update, (handle_player_input, update_lerp_movement, update_lerp_rotation))
@@ -181,6 +253,7 @@ fn setup(
 fn handle_player_input(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     config: Res<GameConfig>,
+    controls: Res<Controls>,
     mut player_query: Query<(&Transform, &mut LerpMovement, &mut LerpRotation, &mut InputRepeatTimer), With<Player>>,
     time: Res<Time>,
 ) {
@@ -203,40 +276,40 @@ fn handle_player_input(
         let right = transform.right();
 
         // Check movement inputs
-        if keyboard_input.pressed(KeyCode::KeyW) {
-            if keyboard_input.just_pressed(KeyCode::KeyW) || input_timer.movement_timer >= repeat_delay {
+        if keyboard_input.pressed(controls.move_forward) {
+            if keyboard_input.just_pressed(controls.move_forward) || input_timer.movement_timer >= repeat_delay {
                 movement_delta += forward * grid_unit;
                 movement_triggered = true;
             }
         }
-        if keyboard_input.pressed(KeyCode::KeyS) {
-            if keyboard_input.just_pressed(KeyCode::KeyS) || input_timer.movement_timer >= repeat_delay {
+        if keyboard_input.pressed(controls.move_backward) {
+            if keyboard_input.just_pressed(controls.move_backward) || input_timer.movement_timer >= repeat_delay {
                 movement_delta -= forward * grid_unit;
                 movement_triggered = true;
             }
         }
-        if keyboard_input.pressed(KeyCode::KeyA) {
-            if keyboard_input.just_pressed(KeyCode::KeyA) || input_timer.movement_timer >= repeat_delay {
+        if keyboard_input.pressed(controls.move_left) {
+            if keyboard_input.just_pressed(controls.move_left) || input_timer.movement_timer >= repeat_delay {
                 movement_delta -= right * grid_unit;
                 movement_triggered = true;
             }
         }
-        if keyboard_input.pressed(KeyCode::KeyD) {
-            if keyboard_input.just_pressed(KeyCode::KeyD) || input_timer.movement_timer >= repeat_delay {
+        if keyboard_input.pressed(controls.move_right) {
+            if keyboard_input.just_pressed(controls.move_right) || input_timer.movement_timer >= repeat_delay {
                 movement_delta += right * grid_unit;
                 movement_triggered = true;
             }
         }
 
         // Check rotation inputs
-        if keyboard_input.pressed(KeyCode::KeyQ) {
-            if keyboard_input.just_pressed(KeyCode::KeyQ) || input_timer.rotation_timer >= repeat_delay {
+        if keyboard_input.pressed(controls.rotate_left) {
+            if keyboard_input.just_pressed(controls.rotate_left) || input_timer.rotation_timer >= repeat_delay {
                 rotation_delta = std::f32::consts::FRAC_PI_2; // 90 degrees
                 rotation_triggered = true;
             }
         }
-        if keyboard_input.pressed(KeyCode::KeyE) {
-            if keyboard_input.just_pressed(KeyCode::KeyE) || input_timer.rotation_timer >= repeat_delay {
+        if keyboard_input.pressed(controls.rotate_right) {
+            if keyboard_input.just_pressed(controls.rotate_right) || input_timer.rotation_timer >= repeat_delay {
                 rotation_delta = -std::f32::consts::FRAC_PI_2; // -90 degrees
                 rotation_triggered = true;
             }
@@ -309,6 +382,7 @@ fn update_lerp_rotation(
 fn handle_camera_look(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     config: Res<GameConfig>,
+    controls: Res<Controls>,
     look_mode: Res<CameraLookMode>,
     mouse_motion: MessageReader<MouseMotion>,
     camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
@@ -318,6 +392,7 @@ fn handle_camera_look(
         LookMode::Relative => {
             handle_camera_look_relative(
                 keyboard_input,
+                controls,
                 config,
                 mouse_motion,
                 camera_query,
@@ -326,6 +401,7 @@ fn handle_camera_look(
         LookMode::Absolute => {
             handle_camera_look_absolute(
                 keyboard_input,
+                controls,
                 config,
                 camera_query,
                 cursor_query,
@@ -336,9 +412,10 @@ fn handle_camera_look(
 
 fn toggle_camera_look_mode(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    controls: Res<Controls>,
     mut look_mode: ResMut<CameraLookMode>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::KeyM) {
+    if keyboard_input.just_pressed(controls.look_mode_toggle) {
         look_mode.0 = match look_mode.0 {
             LookMode::Relative => LookMode::Absolute,
             LookMode::Absolute => LookMode::Relative,
@@ -348,6 +425,7 @@ fn toggle_camera_look_mode(
 
 fn handle_camera_look_relative(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    controls: Res<Controls>,
     config: Res<GameConfig>,
     mut mouse_motion: MessageReader<MouseMotion>,
     mut camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
@@ -358,7 +436,7 @@ fn handle_camera_look_relative(
     let max_down = config.camera.max_look_down.to_radians();
 
     // Check if look key (Tab) is pressed
-    let is_looking = keyboard_input.pressed(KeyCode::Tab);
+    let is_looking = keyboard_input.pressed(controls.look_hold);
 
     // Accumulate mouse motion
     let mut total_delta = Vec2::ZERO;
@@ -399,6 +477,7 @@ fn handle_camera_look_relative(
 
 fn handle_camera_look_absolute(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    controls: Res<Controls>,
     config: Res<GameConfig>,
     mut camera_query: Query<(&mut Transform, &mut CameraLook), With<Camera3d>>,
     cursor_query: Query<&Window, With<PrimaryWindow>>,
@@ -408,7 +487,7 @@ fn handle_camera_look_absolute(
     let max_down = config.camera.max_look_down.to_radians();
 
     // Check if look key (Tab) is pressed
-    let is_looking = keyboard_input.pressed(KeyCode::Tab);
+    let is_looking = keyboard_input.pressed(controls.look_hold);
 
     let window = cursor_query.single().ok();
     let cursor_position = window.and_then(|w: &Window| w.cursor_position());
@@ -483,6 +562,7 @@ fn update_debug_text(
     player_query: Query<&Transform, With<Player>>,
     camera_query: Query<(&Transform, &CameraLook), With<Camera3d>>,
     look_mode: Res<CameraLookMode>,
+    config: Res<GameConfig>,
     mut debug_text_query: Query<&mut Text, With<DebugText>>,
 ) {
     let Ok(player_transform) = player_query.single() else {
@@ -509,7 +589,7 @@ fn update_debug_text(
 
     debug_text.0 = format!(
         "CONTROLS:\n\
-         WASD - Move | QE - Rotate | TAB - Look | M - Toggle Look Mode\n\
+         {} / {} / {} / {} - Move | {} / {} - Rotate | {} - Look | {} - Toggle Look Mode\n\
          \n\
          LOOK MODE: {}\n\
          \n\
@@ -519,6 +599,14 @@ fn update_debug_text(
          \n\
          CAMERA:\n\
          Yaw: {:.2} degrees | Pitch: {:.2} degrees",
+        config.controls.move_forward,
+        config.controls.move_left,
+        config.controls.move_backward,
+        config.controls.move_right,
+        config.controls.rotate_left,
+        config.controls.rotate_right,
+        config.controls.look_hold,
+        config.controls.look_mode_toggle,
         look_mode_str,
         pos.x, pos.y, pos.z,
         euler.0.to_degrees(), euler.1.to_degrees(), euler.2.to_degrees(),
