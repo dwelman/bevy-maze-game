@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::ui::{Node, PositionType, Val};
+use bevy::log::LogPlugin;
 use serde::Deserialize;
 use std::fs;
 
@@ -15,7 +16,7 @@ use system::movement::{
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
-enum LookMode {
+pub enum LookMode {
     Relative,
     Absolute,
 }
@@ -24,47 +25,47 @@ enum LookMode {
 struct CameraLookMode(LookMode);
 
 #[derive(Deserialize, Clone)]
-struct PlayerConfig {
-    grid_unit: f32,
-    lerp_speed: f32,
-    rotation_lerp_speed: f32,
-    input_repeat_delay: f32,
-    collider_size: [f32; 3],
+pub struct PlayerConfig {
+    pub grid_unit: f32,
+    pub lerp_speed: f32,
+    pub rotation_lerp_speed: f32,
+    pub input_repeat_delay: f32,
+    pub collider_size: [f32; 3],
 }
 
 #[derive(Deserialize, Clone)]
-struct CameraConfig {
-    look_mode: LookMode,
-    mouse_sensitivity: f32,
-    max_look_horizontal: f32,
-    max_look_up: f32,
-    max_look_down: f32,
-    look_lerp_speed: f32,
+pub struct CameraConfig {
+    pub look_mode: LookMode,
+    pub mouse_sensitivity: f32,
+    pub max_look_horizontal: f32,
+    pub max_look_up: f32,
+    pub max_look_down: f32,
+    pub look_lerp_speed: f32,
 }
 
 #[derive(Deserialize, Clone)]
-struct ControlsConfig {
-    move_forward: String,
-    move_backward: String,
-    move_left: String,
-    move_right: String,
-    rotate_left: String,
-    rotate_right: String,
-    look_hold: String,
-    look_mode_toggle: String,
+pub struct ControlsConfig {
+    pub move_forward: String,
+    pub move_backward: String,
+    pub move_left: String,
+    pub move_right: String,
+    pub rotate_left: String,
+    pub rotate_right: String,
+    pub look_hold: String,
+    pub look_mode_toggle: String,
 }
 
 #[derive(Deserialize, Clone)]
-struct DebugConfig {
-    logging: bool,
+pub struct DebugConfig {
+    pub log_level: String,
 }
 
 #[derive(Deserialize, Clone)]
-struct GameConfig {
-    player: PlayerConfig,
-    camera: CameraConfig,
-    controls: ControlsConfig,
-    debug: DebugConfig,
+pub struct GameConfig {
+    pub player: PlayerConfig,
+    pub camera: CameraConfig,
+    pub controls: ControlsConfig,
+    pub debug: DebugConfig,
 }
 
 impl Resource for GameConfig {}
@@ -124,6 +125,21 @@ fn parse_keycode(value: &str) -> Result<KeyCode, String> {
     Ok(key)
 }
 
+fn parse_log_level(value: &str) -> bevy::log::Level {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => bevy::log::Level::ERROR, // Bevy doesn't have OFF, use ERROR as minimum
+        "error" => bevy::log::Level::ERROR,
+        "warn" => bevy::log::Level::WARN,
+        "info" => bevy::log::Level::INFO,
+        "debug" => bevy::log::Level::DEBUG,
+        "trace" => bevy::log::Level::TRACE,
+        _ => {
+            eprintln!("Invalid log level '{}', defaulting to 'info'", value);
+            bevy::log::Level::INFO
+        }
+    }
+}
+
 fn main() {
     // Load config
     let config_path = "config.toml";
@@ -135,8 +151,14 @@ fn main() {
     let controls = Controls::from_config(&config.controls)
         .unwrap_or_else(|err| panic!("Invalid controls in config.toml: {}", err));
 
+    // Parse log level from config
+    let log_level = parse_log_level(&config.debug.log_level);
+
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(LogPlugin {
+            level: log_level,
+            ..default()
+        }))
         .insert_resource(config.clone())
         .insert_resource(controls)
         .insert_resource(CameraLookMode(config.camera.look_mode.clone()))

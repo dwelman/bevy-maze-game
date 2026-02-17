@@ -154,19 +154,16 @@ fn check_collision(
     position: Vec3,
     size: Vec3,
     collider_query: &Query<(&Transform, &Collider), Without<LerpMovement>>,
-    debug_logging: bool,
 ) -> bool {
     for (other_transform, other_collider) in collider_query.iter() {
         if aabb_intersects(position, size, other_transform.translation, other_collider.size) {
-            if debug_logging {
-                info!(
-                    "Collision hit: pos={:?} size={:?} other_pos={:?} other_size={:?}",
-                    position,
-                    size,
-                    other_transform.translation,
-                    other_collider.size
-                );
-            }
+            debug!(
+                "Collision hit: pos={:?} size={:?} other_pos={:?} other_size={:?}",
+                position,
+                size,
+                other_transform.translation,
+                other_collider.size
+            );
             return true;
         }
     }
@@ -208,7 +205,6 @@ pub fn update_lerp_movement(
     let delta_time = time.delta_secs();
 
     for (mut transform, mut mov, collider) in &mut query {
-        let debug_logging = config.debug.logging;
         
         match mov.state {
             MovementState::Idle => {
@@ -220,9 +216,9 @@ pub fn update_lerp_movement(
                     mov.target_position = mov.start_position + (mov.movement_delta * grid_unit);
                     
                     // Check if target position would collide before starting movement
-                    if check_collision(mov.target_position, collider.size, &collider_query, debug_logging) {
+                    if check_collision(mov.target_position, collider.size, &collider_query) {
                         // Target is blocked - cancel movement immediately
-                        info!("Target position blocked: {:?}", mov.target_position);
+                        debug!("Target position blocked: {:?}", mov.target_position);
                         mov.movement_delta = Vec3::ZERO; // Consume the delta
                         continue;
                     }
@@ -241,14 +237,14 @@ pub fn update_lerp_movement(
                         let forward_target = mov.start_position + forward_component;
                         let right_target = mov.start_position + right_component;
                         
-                        if check_collision(forward_target, collider.size, &collider_query, debug_logging) {
-                            info!("Diagonal blocked by forward obstacle: {:?}", forward_target);
+                        if check_collision(forward_target, collider.size, &collider_query) {
+                            debug!("Diagonal blocked by forward obstacle: {:?}", forward_target);
                             mov.movement_delta = Vec3::ZERO;
                             continue;
                         }
                         
-                        if check_collision(right_target, collider.size, &collider_query, debug_logging) {
-                            info!("Diagonal blocked by side obstacle: {:?}", right_target);
+                        if check_collision(right_target, collider.size, &collider_query) {
+                            debug!("Diagonal blocked by side obstacle: {:?}", right_target);
                             mov.movement_delta = Vec3::ZERO;
                             continue;
                         }
@@ -257,14 +253,12 @@ pub fn update_lerp_movement(
                     mov.lerp_progress = 0.0;
                     mov.state = MovementState::MovingToTarget;
                     mov.movement_delta = Vec3::ZERO; // Consume the delta
-                    if debug_logging {
-                        info!(
-                            "Move start: from={:?} to={:?} collider={:?}",
-                            mov.start_position,
-                            mov.target_position,
-                            collider.size
-                        );
-                    }
+                    debug!(
+                        "Move start: from={:?} to={:?} collider={:?}",
+                        mov.start_position,
+                        mov.target_position,
+                        collider.size
+                    );
                 } else {
                     // Nothing to do, waiting for input
                     continue;
@@ -276,14 +270,12 @@ pub fn update_lerp_movement(
                     let next_progress = (mov.lerp_progress + lerp_speed * delta_time).min(1.0);
                     let next_position = mov.start_position.lerp(mov.target_position, next_progress);
 
-                    if debug_logging {
-                        info!(
-                            "Move step: progress={:.3} next={:?} target={:?}",
-                            next_progress,
-                            next_position,
-                            mov.target_position
-                        );
-                    }
+                    debug!(
+                        "Move step: progress={:.3} next={:?} target={:?}",
+                        next_progress,
+                        next_position,
+                        mov.target_position
+                    );
 
                     mov.lerp_progress = next_progress;
                     transform.translation = next_position;
@@ -329,3 +321,6 @@ pub fn update_lerp_rotation(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

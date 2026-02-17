@@ -50,5 +50,6 @@ look_mode_toggle = "M"
 input_poll_rate = 60
 
 [debug]
-# Enable verbose movement/collision logging
-logging = true
+# Log level: "off", "error", "warn", "info", "debug", or "trace"
+# Set to "debug" to see detailed movement/collision logging
+log_level = "debug"
