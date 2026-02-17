@@ -9,8 +9,8 @@ use system::camera::{
     handle_camera_look, toggle_camera_look_mode, update_camera_look_lerp, CameraLook,
 };
 use system::movement::{
-    handle_player_input, update_lerp_movement, update_lerp_rotation, InputRepeatTimer,
-    LerpMovement, LerpRotation,
+    handle_player_input, update_lerp_movement, update_lerp_rotation, Collider,
+    InputRepeatTimer, LerpMovement, LerpRotation, MovementState,
 };
 
 #[derive(Deserialize, Clone, Debug)]
@@ -29,6 +29,7 @@ struct PlayerConfig {
     lerp_speed: f32,
     rotation_lerp_speed: f32,
     input_repeat_delay: f32,
+    collider_size: [f32; 3],
 }
 
 #[derive(Deserialize, Clone)]
@@ -54,10 +55,16 @@ struct ControlsConfig {
 }
 
 #[derive(Deserialize, Clone)]
+struct DebugConfig {
+    logging: bool,
+}
+
+#[derive(Deserialize, Clone)]
 struct GameConfig {
     player: PlayerConfig,
     camera: CameraConfig,
     controls: ControlsConfig,
+    debug: DebugConfig,
 }
 
 impl Resource for GameConfig {}
@@ -151,6 +158,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    config: Res<GameConfig>,
 ) {
     // circular base
     commands.spawn((
@@ -158,12 +166,109 @@ fn setup(
         MeshMaterial3d(materials.add(Color::WHITE)),
         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
     ));
-    // cube
+    
+    // Create some obstacles to test collision
+    // Center cube
     commands.spawn((
         Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
         MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
         Transform::from_xyz(0.0, 0.5, 0.0),
+        Collider {
+            size: Vec3::new(1.0, 1.0, 1.0),
+        },
     ));
+    
+    // Wall in front of player
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
+        Transform::from_xyz(0.0, 1.0, 3.0),
+        Collider {
+            size: Vec3::new(1.0, 2.0, 1.0),
+        },
+    ));
+    
+    // corner walls
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
+        Transform::from_xyz(2.0, 1.0, 4.0),
+        Collider {
+            size: Vec3::new(1.0, 2.0, 1.0),
+        },
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
+        Transform::from_xyz(1.0, 1.0, 4.0),
+        Collider {
+            size: Vec3::new(1.0, 2.0, 1.0),
+        },
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
+        Transform::from_xyz(1.0, 1.0, 3.0),
+        Collider {
+            size: Vec3::new(1.0, 2.0, 1.0),
+        },
+    ));
+
+    // Smaller hitbox obstacles
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.8, 1.65, 0.8))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 20, 20))),
+        Transform::from_xyz(1.0, 1.0, -4.0),
+        Collider {
+            size: Vec3::new(0.8, 1.65, 0.8),
+        },
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.8, 1.65, 0.8))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 20, 20))),
+        Transform::from_xyz(2.0, 1.0, -4.0),
+        Collider {
+            size: Vec3::new(0.8, 1.65, 0.8),
+        },
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(0.8, 1.65, 0.8))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(100, 20, 20))),
+        Transform::from_xyz(2.0, 1.0, -3.0),
+        Collider {
+            size: Vec3::new(0.8, 1.65, 0.8),
+        },
+    ));
+
+    // Add gap the player can fit through to test collision edge cases
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.3, 2.0, 1.3))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(20, 100, 20))),
+        Transform::from_xyz(-4.0, 1.0, 0.0),
+        Collider {
+            size: Vec3::new(1.3, 2.0, 1.3),
+        },
+    ));
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(1.3, 2.0, 1.3))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(20, 100, 20))),
+        Transform::from_xyz(-4.0, 1.0, 2.0),
+        Collider {
+            size: Vec3::new(1.3, 2.0, 1.3),
+        },
+    ));
+
+    // Add planes to test collision with flat surfaces
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(4.0, 4.0, 0.1))),
+        MeshMaterial3d(materials.add(Color::srgb_u8(20, 20, 100))),
+        Transform::from_xyz(0.0, 2.0, -4.0),
+        Collider {
+            size: Vec3::new(4.0, 4.0, 0.1),
+        },
+    )); 
+
+
     // light
     commands.spawn((
         PointLight {
@@ -174,14 +279,20 @@ fn setup(
     ));
     
     // player entity with camera
-    let player_pos = Vec3::new(0.0, 0.5, 4.5);
+    // Player body is 0.75 x 0.75 x 1.75, fits in 1x1x2 grid space
+    // Position at y = 0.875 (half of 1.75) to start on ground
+    let player_pos = Vec3::new(0.0, 0.875, 5.0);
     commands.spawn((
         Player,
         LerpMovement {
+            state: MovementState::Idle,
+            movement_delta: Vec3::ZERO,
             target_position: player_pos,
+            start_position: player_pos,
             lerp_progress: 1.0, // Start at target so no initial lerp
         },
         LerpRotation {
+            rotation_delta: 0.0,
             target_rotation: Quat::IDENTITY,
             lerp_progress: 1.0, // Start at target so no initial lerp
         },
@@ -189,8 +300,19 @@ fn setup(
             movement_timer: 0.0,
             rotation_timer: 0.0,
         },
+        Collider {
+            size: Vec3::from_slice(&config.player.collider_size),
+        },
         Transform::from_translation(player_pos),
     )).with_children(|parent| {
+        // Player body mesh
+        parent.spawn((
+            Mesh3d(meshes.add(Cuboid::new(0.75, 1.75, 0.75))),
+            MeshMaterial3d(materials.add(Color::srgb(0.8, 0.2, 0.2))),
+            Transform::IDENTITY,
+        ));
+        
+        // Camera positioned at eye level (near top of player body)
         parent.spawn((
             Camera3d::default(),
             CameraLook {
@@ -199,7 +321,7 @@ fn setup(
                 target_yaw: 0.0,
                 target_pitch: 0.0,
             },
-            Transform::IDENTITY.looking_at(Vec3::ZERO, Vec3::Y),
+            Transform::from_xyz(0.0, 0.7, 0.0).looking_at(Vec3::new(0.0, 0.7, -1.0), Vec3::Y),
         ));
     });
 
