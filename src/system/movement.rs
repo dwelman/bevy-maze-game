@@ -149,40 +149,67 @@ pub fn handle_player_input(
     }
 }
 
-/// Check if placing a collider at the given position would result in a collision
-fn check_collision(
-    position: Vec3,
+/// Check if sweeping a collider along a straight path from `start` to `end` would
+/// intersect any static collider at any point along the way.
+///
+/// Uses a ray-vs-expanded-AABB test (Minkowski sum): each obstacle is grown by
+/// half the mover's size on every axis, and then we test whether the ray from
+/// `start` to `end` passes through that expanded box.
+fn check_swept_collision(
+    start: Vec3,
+    end: Vec3,
     size: Vec3,
     collider_query: &Query<(&Transform, &Collider), Without<LerpMovement>>,
 ) -> bool {
+    let delta = end - start;
+
     for (other_transform, other_collider) in collider_query.iter() {
-        if aabb_intersects(position, size, other_transform.translation, other_collider.size) {
+        let obs_pos = other_transform.translation;
+        // Expand obstacle by half the mover's extents on every axis
+        let expanded_half = (other_collider.size + size) * 0.5;
+
+        let obs_min = obs_pos - expanded_half;
+        let obs_max = obs_pos + expanded_half;
+
+        // Slab test: find the interval [t_enter, t_exit] where the ray is inside
+        // the expanded box.  A zero-length delta component is handled by checking
+        // whether the start point is within the slab on that axis.
+        let mut t_enter = 0.0_f32;
+        let mut t_exit = 1.0_f32;
+
+        for axis in 0..3 {
+            let d = delta[axis];
+            let s = start[axis];
+            let lo = obs_min[axis];
+            let hi = obs_max[axis];
+
+            if d.abs() < f32::EPSILON {
+                // Ray is parallel to the slab on this axis
+                if s < lo || s > hi {
+                    // Entirely outside — no intersection possible
+                    t_enter = f32::INFINITY;
+                    break;
+                }
+                // Otherwise the ray is inside this slab for its whole length;
+                // just continue to the next axis.
+            } else {
+                let t1 = (lo - s) / d;
+                let t2 = (hi - s) / d;
+                let (t_near, t_far) = if t1 < t2 { (t1, t2) } else { (t2, t1) };
+                t_enter = t_enter.max(t_near);
+                t_exit = t_exit.min(t_far);
+            }
+        }
+
+        if t_enter <= t_exit && t_enter < 1.0 && t_exit > 0.0 {
             debug!(
-                "Collision hit: pos={:?} size={:?} other_pos={:?} other_size={:?}",
-                position,
-                size,
-                other_transform.translation,
-                other_collider.size
+                "Swept collision: start={:?} end={:?} size={:?} obs_pos={:?} obs_size={:?} t_enter={:.3}",
+                start, end, size, obs_pos, other_collider.size, t_enter
             );
             return true;
         }
     }
     false
-}
-
-/// Check if two axis-aligned bounding boxes intersect
-fn aabb_intersects(pos1: Vec3, size1: Vec3, pos2: Vec3, size2: Vec3) -> bool {
-    let half_size1 = size1 * 0.5;
-    let half_size2 = size2 * 0.5;
-    
-    let min1 = pos1 - half_size1;
-    let max1 = pos1 + half_size1;
-    let min2 = pos2 - half_size2;
-    let max2 = pos2 + half_size2;
-    
-    max1.x > min2.x && min1.x < max2.x &&
-    max1.y > min2.y && min1.y < max2.y &&
-    max1.z > min2.z && min1.z < max2.z
 }
 
 /// Snap a position to the nearest grid point based on grid_unit
@@ -215,36 +242,37 @@ pub fn update_lerp_movement(
                     mov.start_position = snap_to_grid(transform.translation, grid_unit);
                     mov.target_position = mov.start_position + (mov.movement_delta * grid_unit);
                     
-                    // Check if target position would collide before starting movement
-                    if check_collision(mov.target_position, collider.size, &collider_query) {
-                        // Target is blocked - cancel movement immediately
-                        debug!("Target position blocked: {:?}", mov.target_position);
+                    // Swept collision: check the entire path from start to target,
+                    // not just the endpoint, so thin walls cannot be tunnelled through.
+                    if check_swept_collision(mov.start_position, mov.target_position, collider.size, &collider_query) {
+                        debug!("Swept path blocked: {:?} -> {:?}", mov.start_position, mov.target_position);
                         mov.movement_delta = Vec3::ZERO; // Consume the delta
                         continue;
                     }
-                    
-                    // For diagonal movement, also check individual axis movements to prevent corner clipping
+
+                    // For diagonal movement, also sweep each axis component separately
+                    // to prevent corner-clipping through narrow passages.
                     let forward = transform.forward().as_vec3();
                     let right = transform.right().as_vec3();
                     let movement_vec = mov.movement_delta * grid_unit;
-                    
+
                     // Project movement onto forward and right axes
                     let forward_component = movement_vec.dot(forward) * forward;
                     let right_component = movement_vec.dot(right) * right;
-                    
-                    // If moving diagonally (both components non-zero), check each axis separately
+
+                    // If moving diagonally (both components non-zero), sweep each axis separately
                     if forward_component.length_squared() > 0.01 && right_component.length_squared() > 0.01 {
                         let forward_target = mov.start_position + forward_component;
                         let right_target = mov.start_position + right_component;
-                        
-                        if check_collision(forward_target, collider.size, &collider_query) {
-                            debug!("Diagonal blocked by forward obstacle: {:?}", forward_target);
+
+                        if check_swept_collision(mov.start_position, forward_target, collider.size, &collider_query) {
+                            debug!("Diagonal swept blocked by forward obstacle: {:?}", forward_target);
                             mov.movement_delta = Vec3::ZERO;
                             continue;
                         }
-                        
-                        if check_collision(right_target, collider.size, &collider_query) {
-                            debug!("Diagonal blocked by side obstacle: {:?}", right_target);
+
+                        if check_swept_collision(mov.start_position, right_target, collider.size, &collider_query) {
+                            debug!("Diagonal swept blocked by side obstacle: {:?}", right_target);
                             mov.movement_delta = Vec3::ZERO;
                             continue;
                         }
@@ -253,7 +281,7 @@ pub fn update_lerp_movement(
                     mov.lerp_progress = 0.0;
                     mov.state = MovementState::MovingToTarget;
                     mov.movement_delta = Vec3::ZERO; // Consume the delta
-                    debug!(
+                    trace!(
                         "Move start: from={:?} to={:?} collider={:?}",
                         mov.start_position,
                         mov.target_position,
@@ -270,7 +298,7 @@ pub fn update_lerp_movement(
                     let next_progress = (mov.lerp_progress + lerp_speed * delta_time).min(1.0);
                     let next_position = mov.start_position.lerp(mov.target_position, next_progress);
 
-                    debug!(
+                    trace!(
                         "Move step: progress={:.3} next={:?} target={:?}",
                         next_progress,
                         next_position,

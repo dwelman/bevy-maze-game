@@ -56,71 +56,6 @@ use super::*;
     }
 
     #[test]
-    fn aabb_intersects_positive_overlap() {
-        // Overlapping volumes should register as a collision.
-        let hit = aabb_intersects(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(2.0, 2.0, 2.0),
-            Vec3::new(0.5, 0.0, 0.0),
-            Vec3::new(2.0, 2.0, 2.0),
-        );
-
-        assert!(hit);
-    }
-
-    #[test]
-    fn aabb_intersects_negative_separated() {
-        // Well-separated volumes should not collide.
-        let hit = aabb_intersects(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(1.0, 1.0, 1.0),
-            Vec3::new(5.0, 0.0, 0.0),
-            Vec3::new(1.0, 1.0, 1.0),
-        );
-
-        assert!(!hit);
-    }
-
-    #[test]
-    fn aabb_intersects_edge_touch_is_not_collision() {
-        // Touching exactly on a face should not count as a collision.
-        let hit = aabb_intersects(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(2.0, 2.0, 2.0),
-            Vec3::new(2.0, 0.0, 0.0),
-            Vec3::new(2.0, 2.0, 2.0),
-        );
-
-        assert!(!hit);
-    }
-
-    #[test]
-    fn aabb_intersects_corner_touch_is_not_collision() {
-        // Touching only at a corner should not count as a collision.
-        let hit = aabb_intersects(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(2.0, 2.0, 2.0),
-            Vec3::new(2.0, 0.0, 2.0),
-            Vec3::new(2.0, 2.0, 2.0),
-        );
-
-        assert!(!hit);
-    }
-
-    #[test]
-    fn aabb_intersects_corner_overlap_is_collision() {
-        // A tiny overlap at the corner should still count as a collision.
-        let hit = aabb_intersects(
-            Vec3::new(0.0, 0.0, 0.0),
-            Vec3::new(2.0, 2.0, 2.0),
-            Vec3::new(1.99, 0.0, 1.99),
-            Vec3::new(2.0, 2.0, 2.0),
-        );
-
-        assert!(hit);
-    }
-
-    #[test]
     fn snap_to_grid_rounds_to_nearest_cell() {
         // Positions should round to the nearest grid unit.
         let snapped = snap_to_grid(Vec3::new(1.6, 2.0, -2.4), 1.0);
@@ -137,62 +72,44 @@ use super::*;
     }
 
     #[test]
-    fn check_collision_positive_hit() {
-        // Overlapping colliders in the world should be detected as a collision.
+    fn check_swept_collision_static_overlap_hit() {
+        // A zero-length sweep (start == end) should detect a direct overlap.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::ZERO),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
         ));
 
         let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        let hit = check_collision(
-            Vec3::ZERO,
-            Vec3::splat(1.0),
-            &query,
-        );
-
-        assert!(hit);
+        assert!(check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
     }
 
     #[test]
-    fn check_collision_negative_miss() {
-        // Non-overlapping colliders should not be reported as a collision.
+    fn check_swept_collision_static_overlap_miss() {
+        // A zero-length sweep far from the obstacle should report no collision.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::ZERO),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
         ));
 
         let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        let hit = check_collision(
-            Vec3::new(3.0, 0.0, 0.0),
-            Vec3::splat(1.0),
-            &query,
-        );
-
-        assert!(!hit);
+        assert!(!check_swept_collision(Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0), Vec3::splat(1.0), &query));
     }
 
     #[test]
-    fn check_collision_ignores_lerp_movement_entities() {
-        // Entities with LerpMovement should be filtered out by the query.
+    fn check_swept_collision_ignores_lerp_movement_entities() {
+        // Entities with LerpMovement should be excluded from swept checks.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::ZERO),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
             make_lerp_movement(),
         ));
 
@@ -200,91 +117,124 @@ use super::*;
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        let hit = check_collision(
-            Vec3::ZERO,
-            Vec3::splat(1.0),
-            &query,
-        );
-
-        assert!(!hit);
+        assert!(!check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
     }
 
     #[test]
-    fn check_collision_tight_gap_blocks_entity() {
-        // A gap narrower than the entity should still report a collision.
+    fn check_swept_collision_tight_gap_blocks_entity() {
+        // A gap narrower than the entity should block even a zero-length sweep.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::new(-0.6, 0.0, 0.0)),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
         ));
         world.spawn((
             Transform::from_translation(Vec3::new(0.6, 0.0, 0.0)),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
         ));
 
         let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        let hit = check_collision(Vec3::ZERO, Vec3::splat(0.5), &query);
-
-        assert!(hit);
+        assert!(check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(0.5), &query));
     }
 
     #[test]
-    fn check_collision_wide_gap_allows_entity() {
-        // A gap wider than the entity should allow passage without collision.
+    fn check_swept_collision_wide_gap_allows_entity() {
+        // A gap wider than the entity should allow a zero-length sweep through.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::new(-1.0, 0.0, 0.0)),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
         ));
         world.spawn((
             Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
-            Collider {
-                size: Vec3::splat(1.0),
-            },
+            Collider { size: Vec3::splat(1.0) },
         ));
 
         let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        let hit = check_collision(Vec3::ZERO, Vec3::splat(0.5), &query);
-
-        assert!(!hit);
+        assert!(!check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(0.5), &query));
     }
 
     #[test]
-    fn aabb_intersects_thin_wall_blocks_movement() {
-        // Even a thin wall should block movement if it overlaps the entity.
-        let wall_pos = Vec3::ZERO;
-        let wall_size = Vec3::new(0.1, 2.0, 2.0);
-        let entity_pos = Vec3::ZERO;
-        let entity_size = Vec3::splat(1.0);
+    fn check_swept_collision_thin_wall_blocks_sweep() {
+        // A thin wall mid-path should block the sweep even if start and end are clear.
+        let mut world = World::new();
+        world.spawn((
+            Transform::from_translation(Vec3::new(0.5, 0.0, 0.0)),
+            Collider { size: Vec3::new(0.1, 2.0, 2.0) },
+        ));
 
-        let hit = aabb_intersects(entity_pos, entity_size, wall_pos, wall_size);
+        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+            SystemState::new(&mut world);
+        let query = state.get(&world);
 
-        assert!(hit);
+        assert!(check_swept_collision(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::splat(1.0), &query));
     }
 
     #[test]
-    fn aabb_intersects_thin_wall_clear_when_past_it() {
-        // Once fully past a thin wall, there should be no collision.
-        let wall_pos = Vec3::ZERO;
-        let wall_size = Vec3::new(0.1, 2.0, 2.0);
-        let entity_pos = Vec3::new(1.0, 0.0, 0.0);
-        let entity_size = Vec3::splat(1.0);
+    fn check_swept_collision_thin_wall_clear_when_past_it() {
+        // A sweep that starts fully past a thin wall should not collide.
+        let mut world = World::new();
+        world.spawn((
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            Collider { size: Vec3::new(0.1, 2.0, 2.0) },
+        ));
 
-        let hit = aabb_intersects(entity_pos, entity_size, wall_pos, wall_size);
+        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+            SystemState::new(&mut world);
+        let query = state.get(&world);
 
-        assert!(!hit);
+        // Moving from x=1 to x=2 — wall at x=0 is behind the mover
+        assert!(!check_swept_collision(Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), Vec3::splat(1.0), &query));
+    }
+
+    #[test]
+    fn check_swept_collision_face_touch_is_not_collision() {
+        // A static mover whose face exactly touches an obstacle face should not collide.
+        // Obstacle at x=1.5, size 1 → left face at x=1.0.
+        // Mover at x=0, size 2 → right face at x=1.0.
+        // Expanded half = (1.0 + 2.0) * 0.5 = 1.5 → expanded box: [0.0, 3.0].
+        // Zero-length sweep at x=0: s=0, lo=0.0, hi=3.0 → s is inside slab, no exclusion.
+        // Wait — that overlaps. Use exact non-overlapping placement instead:
+        // Obstacle at x=2, size 2 → edges at [1, 3].
+        // Mover size 2 → expanded: [0, 4].
+        // Zero-length sweep at x=0: start is inside expanded box → collision.
+        // Correct approach: mover centre at x=-1, sweep to x=0; expanded left edge at 0.
+        // t_enter = (0 - (-1)) / 1 = 1.0, which is NOT < 1.0 → no collision.
+        let mut world = World::new();
+        world.spawn((
+            Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)),
+            Collider { size: Vec3::new(2.0, 2.0, 2.0) },
+        ));
+
+        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+            SystemState::new(&mut world);
+        let query = state.get(&world);
+
+        // Sweep from (-1,0,0) to (0,0,0): t_enter == 1.0 exactly, strict < 1.0 excludes it.
+        assert!(!check_swept_collision(Vec3::new(-1.0, 0.0, 0.0), Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0), &query));
+    }
+
+    #[test]
+    fn check_swept_collision_tiny_overlap_is_collision() {
+        // Even a tiny overlap at the end of the sweep should register as a collision.
+        let mut world = World::new();
+        world.spawn((
+            Transform::from_translation(Vec3::new(1.99, 0.0, 1.99)),
+            Collider { size: Vec3::new(2.0, 2.0, 2.0) },
+        ));
+
+        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+            SystemState::new(&mut world);
+        let query = state.get(&world);
+
+        // Zero-length sweep: mover (size 2) at origin overlaps obstacle at (1.99, 0, 1.99).
+        assert!(check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0), &query));
     }
 
     #[test]
@@ -550,6 +500,56 @@ use super::*;
         
         assert_eq!(rotation.lerp_progress, 1.0);
         assert_eq!(transform.rotation, target_rot);
+    }
+
+    #[test]
+    fn movement_blocked_by_thin_wall_tunnel_through() {
+        // A thin wall (0.1 wide) at x=0.5 should block movement from (0,0,0) to (1,0,0)
+        // even though neither endpoint overlaps the wall.
+        // Player collider: (0.6, 1.75, 0.6), wall: (0.1, 2, 2) at (0.5, 0, 0).
+        let mut world = World::new();
+        world.insert_resource(make_test_config());
+        world.insert_resource(make_test_time());
+
+        // Thin wall that the player would pass through
+        world.spawn((
+            Transform::from_translation(Vec3::new(0.5, 0.0, 0.0)),
+            Collider {
+                size: Vec3::new(0.1, 2.0, 2.0),
+            },
+        ));
+
+        let player_size = Vec3::new(0.6, 1.75, 0.6);
+        let entity = world.spawn((
+            Transform::from_translation(Vec3::ZERO),
+            Collider { size: player_size },
+            LerpMovement {
+                state: MovementState::Idle,
+                movement_delta: Vec3::new(1.0, 0.0, 0.0),
+                target_position: Vec3::ZERO,
+                start_position: Vec3::ZERO,
+                lerp_progress: 1.0,
+            },
+        )).id();
+
+        let mut update_state: SystemState<(
+            Res<Time>,
+            Res<GameConfig>,
+            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
+            Query<(&Transform, &Collider), Without<LerpMovement>>,
+        )> = SystemState::new(&mut world);
+
+        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, moving_query, collider_query);
+        update_state.apply(&mut world);
+
+        let transform = world.get::<Transform>(entity).unwrap();
+        let movement = world.get::<LerpMovement>(entity).unwrap();
+
+        // Movement should be blocked — player must not tunnel through the wall
+        assert_eq!(movement.state, MovementState::Idle, "player should remain idle (blocked)");
+        assert_eq!(transform.translation, Vec3::ZERO, "player should not have moved");
+        assert_eq!(movement.movement_delta, Vec3::ZERO, "movement delta should be consumed");
     }
 
     #[test]

@@ -343,8 +343,8 @@ fn spawn_room(
 
 fn setup(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut _meshes: ResMut<Assets<Mesh>>,
+    mut _materials: ResMut<Assets<StandardMaterial>>,
     config: Res<GameConfig>,
 ) {
     commands.spawn((
@@ -384,13 +384,6 @@ fn setup(
         },
         Transform::from_translation(player_pos),
     )).with_children(|parent| {
-        // Player body mesh
-        parent.spawn((
-            Mesh3d(meshes.add(Cuboid::new(0.75, 1.75, 0.75))),
-            MeshMaterial3d(materials.add(Color::srgb(0.8, 0.2, 0.2))),
-            Transform::IDENTITY,
-        ));
-
         // Camera at eye level
         parent.spawn((
             Camera3d::default(),
