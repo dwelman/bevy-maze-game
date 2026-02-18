@@ -4,8 +4,10 @@ use bevy::log::LogPlugin;
 use serde::Deserialize;
 use std::fs;
 
+mod map;
 mod system;
 
+use map::{Direction, Edge, EdgeType, Grid};
 use system::camera::{
     handle_camera_look, toggle_camera_look_mode, update_camera_look_lerp, CameraLook,
 };
@@ -127,7 +129,7 @@ fn parse_keycode(value: &str) -> Result<KeyCode, String> {
 
 fn parse_log_level(value: &str) -> bevy::log::Level {
     match value.trim().to_ascii_lowercase().as_str() {
-        "off" => bevy::log::Level::ERROR, // Bevy doesn't have OFF, use ERROR as minimum
+        "off" => bevy::log::Level::ERROR,
         "error" => bevy::log::Level::ERROR,
         "warn" => bevy::log::Level::WARN,
         "info" => bevy::log::Level::INFO,
@@ -138,6 +140,14 @@ fn parse_log_level(value: &str) -> bevy::log::Level {
             bevy::log::Level::INFO
         }
     }
+}
+
+/// Room dimensions in grid cells.
+#[derive(Resource)]
+struct RoomConfig {
+    width: i32,
+    depth: i32,
+    height: i32,
 }
 
 fn main() {
@@ -151,18 +161,26 @@ fn main() {
     let controls = Controls::from_config(&config.controls)
         .unwrap_or_else(|err| panic!("Invalid controls in config.toml: {}", err));
 
-    // Parse log level from config
     let log_level = parse_log_level(&config.debug.log_level);
+
+    // Configure log filter to suppress noisy third-party crates
+    let log_filter = format!(
+        "{}={},wgpu=warn,naga=warn,cosmic_text=info",
+        env!("CARGO_PKG_NAME").replace("-", "_"),
+        config.debug.log_level.to_lowercase()
+    );
 
     App::new()
         .add_plugins(DefaultPlugins.set(LogPlugin {
             level: log_level,
+            filter: log_filter,
             ..default()
         }))
         .insert_resource(config.clone())
         .insert_resource(controls)
         .insert_resource(CameraLookMode(config.camera.look_mode.clone()))
-        .add_systems(Startup, setup)
+        .insert_resource(RoomConfig { width: 10, depth: 10, height: 5 })
+        .add_systems(Startup, (setup, spawn_room))
         .add_systems(Update, (handle_player_input, update_lerp_movement, update_lerp_rotation))
         .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
         .add_systems(Update, update_debug_text)
@@ -175,135 +193,174 @@ struct Player;
 #[derive(Component)]
 struct DebugText;
 
-/// set up a simple 3D scene
+/// Builds the room grid and spawns all wall/floor/ceiling geometry in one pass.
+///
+/// Deduplication rule — for each shared interior edge, only one panel is spawned:
+/// - East, South, Up faces: always spawn if solid (positive-axis canonical owner)
+/// - West, North, Down faces: only spawn at boundary (no neighbour in that direction)
+fn spawn_room(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    config: Res<GameConfig>,
+    room: Res<RoomConfig>,
+) {
+    let g = config.player.grid_unit;
+    let (width, depth, height) = (room.width, room.depth, room.height);
+    const WALL_T: f32 = 0.1;
+
+    let mut grid = Grid::new();
+
+    // Phase 1: add all cells (wires neighbour links bidirectionally).
+    for y in 0..height {
+        for z in 0..depth {
+            for x in 0..width {
+                grid.add_cell(x, y, z);
+            }
+        }
+    }
+
+    // Phase 2: open interior edges.
+    // Each set_edge call mirrors to the neighbour automatically.
+    for y in 0..height {
+        for z in 0..depth {
+            for x in 0..width {
+                let coord = IVec3::new(x, y, z);
+
+                // Vertical: floor on bottom layer, ceiling on top, open in between.
+                if y == 0 {
+                    grid.set_edge(coord, Direction::Down, Edge::floor());
+                } else {
+                    grid.set_edge(coord, Direction::Down, Edge::open());
+                }
+                if y == height - 1 {
+                    grid.set_edge(coord, Direction::Up, Edge::ceiling());
+                }
+                // Note: interior Up edges default to Wall until the cell above
+                // sets its Down to open (mirrored), so no explicit Up open needed here.
+
+                // Horizontal: open interior connections (avoid double-opening by
+                // only handling East and South — each shared edge covered once).
+                if x < width - 1 {
+                    grid.set_edge(coord, Direction::East, Edge::open());
+                }
+                if z < depth - 1 {
+                    grid.set_edge(coord, Direction::South, Edge::open());
+                }
+            }
+        }
+    }
+
+    // Phase 3: spawn geometry for every solid edge (deduplicated).
+    let wall_mat  = materials.add(Color::srgb(0.45, 0.45, 0.55));
+    let floor_mat = materials.add(Color::srgb(0.30, 0.28, 0.25));
+    let ceil_mat  = materials.add(Color::srgb(0.25, 0.25, 0.30));
+
+    // Pre-create mesh handles — all panels of the same shape share one GPU mesh.
+    let ns_mesh = meshes.add(Cuboid::new(g, g, WALL_T)); // North/South face
+    let ew_mesh = meshes.add(Cuboid::new(WALL_T, g, g)); // East/West face
+    let h_mesh  = meshes.add(Cuboid::new(g, WALL_T, g)); // Floor/Ceiling
+
+    // Collect coords first to avoid borrow conflict when reading cells + inserting resource.
+    let coords: Vec<IVec3> = grid.cells.keys().copied().collect();
+
+    for coord in coords {
+        let cell = &grid.cells[&coord];
+        let cx = coord.x as f32 * g;
+        let cy = coord.y as f32 * g;
+        let cz = coord.z as f32 * g;
+        let half = g * 0.5;
+
+        // ── East (+X) — always spawn if Wall ────────────────────────────────
+        if cell.get_edge(Direction::East).edge_type == EdgeType::Wall {
+            commands.spawn((
+                Mesh3d(ew_mesh.clone()),
+                MeshMaterial3d(wall_mat.clone()),
+                Transform::from_xyz(cx + half, cy, cz),
+                Collider { size: Vec3::new(WALL_T, g, g) },
+            ));
+        }
+
+        // ── South (+Z) — always spawn if Wall ───────────────────────────────
+        if cell.get_edge(Direction::South).edge_type == EdgeType::Wall {
+            commands.spawn((
+                Mesh3d(ns_mesh.clone()),
+                MeshMaterial3d(wall_mat.clone()),
+                Transform::from_xyz(cx, cy, cz + half),
+                Collider { size: Vec3::new(g, g, WALL_T) },
+            ));
+        }
+
+        // ── Up (ceiling) — always spawn if Ceiling ──────────────────────────
+        if cell.get_edge(Direction::Up).edge_type == EdgeType::Ceiling {
+            commands.spawn((
+                Mesh3d(h_mesh.clone()),
+                MeshMaterial3d(ceil_mat.clone()),
+                Transform::from_xyz(cx, cy + half, cz),
+                Collider { size: Vec3::new(g, WALL_T, g) },
+            ));
+        }
+
+        // ── West (-X) — boundary only (no West neighbour) ───────────────────
+        if cell.get_edge(Direction::West).edge_type == EdgeType::Wall
+            && cell.neighbours.get(&Direction::West).copied().flatten().is_none()
+        {
+            commands.spawn((
+                Mesh3d(ew_mesh.clone()),
+                MeshMaterial3d(wall_mat.clone()),
+                Transform::from_xyz(cx - half, cy, cz),
+                Collider { size: Vec3::new(WALL_T, g, g) },
+            ));
+        }
+
+        // ── North (-Z) — boundary only (no North neighbour) ─────────────────
+        if cell.get_edge(Direction::North).edge_type == EdgeType::Wall
+            && cell.neighbours.get(&Direction::North).copied().flatten().is_none()
+        {
+            commands.spawn((
+                Mesh3d(ns_mesh.clone()),
+                MeshMaterial3d(wall_mat.clone()),
+                Transform::from_xyz(cx, cy, cz - half),
+                Collider { size: Vec3::new(g, g, WALL_T) },
+            ));
+        }
+
+        // ── Down (floor) — boundary only (no Down neighbour) ────────────────
+        if cell.get_edge(Direction::Down).edge_type == EdgeType::Floor
+            && cell.neighbours.get(&Direction::Down).copied().flatten().is_none()
+        {
+            commands.spawn((
+                Mesh3d(h_mesh.clone()),
+                MeshMaterial3d(floor_mat.clone()),
+                Transform::from_xyz(cx, cy - half, cz),
+                Collider { size: Vec3::new(g, WALL_T, g) },
+            ));
+        }
+    }
+
+    commands.insert_resource(grid);
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     config: Res<GameConfig>,
 ) {
-    // circular base
-    commands.spawn((
-        Mesh3d(meshes.add(Circle::new(4.0))),
-        MeshMaterial3d(materials.add(Color::WHITE)),
-        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
-    
-    // Create some obstacles to test collision
-    // Center cube
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-        Transform::from_xyz(0.0, 0.5, 0.0),
-        Collider {
-            size: Vec3::new(1.0, 1.0, 1.0),
-        },
-    ));
-    
-    // Wall in front of player
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
-        Transform::from_xyz(0.0, 1.0, 3.0),
-        Collider {
-            size: Vec3::new(1.0, 2.0, 1.0),
-        },
-    ));
-    
-    // corner walls
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
-        Transform::from_xyz(2.0, 1.0, 4.0),
-        Collider {
-            size: Vec3::new(1.0, 2.0, 1.0),
-        },
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
-        Transform::from_xyz(1.0, 1.0, 4.0),
-        Collider {
-            size: Vec3::new(1.0, 2.0, 1.0),
-        },
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.0, 2.0, 1.0))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 100, 200))),
-        Transform::from_xyz(1.0, 1.0, 3.0),
-        Collider {
-            size: Vec3::new(1.0, 2.0, 1.0),
-        },
-    ));
-
-    // Smaller hitbox obstacles
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.8, 1.65, 0.8))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 20, 20))),
-        Transform::from_xyz(1.0, 1.0, -4.0),
-        Collider {
-            size: Vec3::new(0.8, 1.65, 0.8),
-        },
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.8, 1.65, 0.8))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 20, 20))),
-        Transform::from_xyz(2.0, 1.0, -4.0),
-        Collider {
-            size: Vec3::new(0.8, 1.65, 0.8),
-        },
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(0.8, 1.65, 0.8))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(100, 20, 20))),
-        Transform::from_xyz(2.0, 1.0, -3.0),
-        Collider {
-            size: Vec3::new(0.8, 1.65, 0.8),
-        },
-    ));
-
-    // Add gap the player can fit through to test collision edge cases
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.3, 2.0, 1.3))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(20, 100, 20))),
-        Transform::from_xyz(-4.0, 1.0, 0.0),
-        Collider {
-            size: Vec3::new(1.3, 2.0, 1.3),
-        },
-    ));
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(1.3, 2.0, 1.3))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(20, 100, 20))),
-        Transform::from_xyz(-4.0, 1.0, 2.0),
-        Collider {
-            size: Vec3::new(1.3, 2.0, 1.3),
-        },
-    ));
-
-    // Add planes to test collision with flat surfaces
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(4.0, 4.0, 0.1))),
-        MeshMaterial3d(materials.add(Color::srgb_u8(20, 20, 100))),
-        Transform::from_xyz(0.0, 2.0, -4.0),
-        Collider {
-            size: Vec3::new(4.0, 4.0, 0.1),
-        },
-    )); 
-
-
-    // light
     commands.spawn((
         PointLight {
             shadows_enabled: true,
+            intensity: 2_000_000.0,
+            range: 20.0,
             ..default()
         },
-        Transform::from_xyz(4.0, 8.0, 4.0),
+        Transform::from_xyz(2.0, 4.0, 2.0),
     ));
-    
-    // player entity with camera
-    // Player body is 0.75 x 0.75 x 1.75, fits in 1x1x2 grid space
-    // Position at y = 0.875 (half of 1.75) to start on ground
-    let player_pos = Vec3::new(0.0, 0.875, 5.0);
+
+    // Player — spawns at cell (2, 0, 2).
+    // Cell centres are at integer world coords; player Y = half body height.
+    let player_pos = Vec3::new(2.0, 0.975, 2.0);
+
     commands.spawn((
         Player,
         LerpMovement {
@@ -311,12 +368,12 @@ fn setup(
             movement_delta: Vec3::ZERO,
             target_position: player_pos,
             start_position: player_pos,
-            lerp_progress: 1.0, // Start at target so no initial lerp
+            lerp_progress: 1.0,
         },
         LerpRotation {
             rotation_delta: 0.0,
             target_rotation: Quat::IDENTITY,
-            lerp_progress: 1.0, // Start at target so no initial lerp
+            lerp_progress: 1.0,
         },
         InputRepeatTimer {
             movement_timer: 0.0,
@@ -333,8 +390,8 @@ fn setup(
             MeshMaterial3d(materials.add(Color::srgb(0.8, 0.2, 0.2))),
             Transform::IDENTITY,
         ));
-        
-        // Camera positioned at eye level (near top of player body)
+
+        // Camera at eye level
         parent.spawn((
             Camera3d::default(),
             CameraLook {
@@ -388,7 +445,7 @@ fn update_debug_text(
     let pos = player_transform.translation;
     let rot = player_transform.rotation;
     let euler = rot.to_euler(bevy::math::EulerRot::YXZ);
-    
+
     let look_mode_str = match look_mode.0 {
         LookMode::Relative => "Relative",
         LookMode::Absolute => "Absolute",
