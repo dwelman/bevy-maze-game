@@ -150,20 +150,28 @@ pub fn handle_player_input(
 }
 
 /// Check if sweeping a collider along a straight path from `start` to `end` would
-/// intersect any static collider at any point along the way.
+/// intersect any other collider at any point along the way.
+///
+/// `self_entity` is excluded so an entity cannot collide with itself.
+/// All other entities with a `Collider` are tested — including those that are
+/// also moving — so turn-based entities block each other's intended destinations.
 ///
 /// Uses a ray-vs-expanded-AABB test (Minkowski sum): each obstacle is grown by
 /// half the mover's size on every axis, and then we test whether the ray from
 /// `start` to `end` passes through that expanded box.
 fn check_swept_collision(
+    self_entity: Entity,
     start: Vec3,
     end: Vec3,
     size: Vec3,
-    collider_query: &Query<(&Transform, &Collider), Without<LerpMovement>>,
+    collider_query: &Query<(Entity, &Transform, &Collider)>,
 ) -> bool {
     let delta = end - start;
 
-    for (other_transform, other_collider) in collider_query.iter() {
+    for (entity, other_transform, other_collider) in collider_query.iter() {
+        if entity == self_entity {
+            continue;
+        }
         let obs_pos = other_transform.translation;
         // Expand obstacle by half the mover's extents on every axis
         let expanded_half = (other_collider.size + size) * 0.5;
@@ -224,94 +232,107 @@ fn snap_to_grid(position: Vec3, grid_unit: f32) -> Vec3 {
 pub fn update_lerp_movement(
     time: Res<Time>,
     config: Res<GameConfig>,
-    mut query: Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-    collider_query: Query<(&Transform, &Collider), Without<LerpMovement>>,
+    mut queries: ParamSet<(
+        Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+        Query<(Entity, &Transform, &Collider)>,
+    )>,
 ) {
     let lerp_speed = config.player.lerp_speed;
     let grid_unit = config.player.grid_unit;
     let delta_time = time.delta_secs();
 
-    for (mut transform, mut mov, collider) in &mut query {
-        
-        match mov.state {
+    // Collect all mover state up-front so we can borrow the collider query freely.
+    let movers: Vec<(Entity, Vec3, Vec3, Vec3, MovementState, f32)> = queries
+        .p0()
+        .iter()
+        .map(|(e, tf, mov, col)| {
+            (e, tf.translation, col.size, mov.movement_delta, mov.state, mov.lerp_progress)
+        })
+        .collect();
+
+    // For each mover, decide what to do, then apply mutations back via p0.
+    for (entity, translation, col_size, movement_delta, state, lerp_progress) in movers {
+        match state {
             MovementState::Idle => {
-                // Check if there's a movement delta to process
-                if mov.movement_delta != Vec3::ZERO {
-                    // Initiate movement - apply grid_unit to the direction
-                    // Snap start position to grid to prevent drift
-                    mov.start_position = snap_to_grid(transform.translation, grid_unit);
-                    mov.target_position = mov.start_position + (mov.movement_delta * grid_unit);
-                    
-                    // Swept collision: check the entire path from start to target,
-                    // not just the endpoint, so thin walls cannot be tunnelled through.
-                    if check_swept_collision(mov.start_position, mov.target_position, collider.size, &collider_query) {
-                        debug!("Swept path blocked: {:?} -> {:?}", mov.start_position, mov.target_position);
-                        mov.movement_delta = Vec3::ZERO; // Consume the delta
-                        continue;
-                    }
-
-                    // For diagonal movement, also sweep each axis component separately
-                    // to prevent corner-clipping through narrow passages.
-                    let forward = transform.forward().as_vec3();
-                    let right = transform.right().as_vec3();
-                    let movement_vec = mov.movement_delta * grid_unit;
-
-                    // Project movement onto forward and right axes
-                    let forward_component = movement_vec.dot(forward) * forward;
-                    let right_component = movement_vec.dot(right) * right;
-
-                    // If moving diagonally (both components non-zero), sweep each axis separately
-                    if forward_component.length_squared() > 0.01 && right_component.length_squared() > 0.01 {
-                        let forward_target = mov.start_position + forward_component;
-                        let right_target = mov.start_position + right_component;
-
-                        if check_swept_collision(mov.start_position, forward_target, collider.size, &collider_query) {
-                            debug!("Diagonal swept blocked by forward obstacle: {:?}", forward_target);
-                            mov.movement_delta = Vec3::ZERO;
-                            continue;
-                        }
-
-                        if check_swept_collision(mov.start_position, right_target, collider.size, &collider_query) {
-                            debug!("Diagonal swept blocked by side obstacle: {:?}", right_target);
-                            mov.movement_delta = Vec3::ZERO;
-                            continue;
-                        }
-                    }
-                    
-                    mov.lerp_progress = 0.0;
-                    mov.state = MovementState::MovingToTarget;
-                    mov.movement_delta = Vec3::ZERO; // Consume the delta
-                    trace!(
-                        "Move start: from={:?} to={:?} collider={:?}",
-                        mov.start_position,
-                        mov.target_position,
-                        collider.size
-                    );
-                } else {
-                    // Nothing to do, waiting for input
+                if movement_delta == Vec3::ZERO {
                     continue;
                 }
-            }
-            MovementState::MovingToTarget => {
-                if mov.lerp_progress < 1.0 {
-                    // Continue lerping toward target (collision already validated before movement started)
-                    let next_progress = (mov.lerp_progress + lerp_speed * delta_time).min(1.0);
-                    let next_position = mov.start_position.lerp(mov.target_position, next_progress);
 
-                    trace!(
-                        "Move step: progress={:.3} next={:?} target={:?}",
-                        next_progress,
-                        next_position,
-                        mov.target_position
-                    );
+                let start = snap_to_grid(translation, grid_unit);
+                let target = start + (movement_delta * grid_unit);
 
-                    mov.lerp_progress = next_progress;
-                    transform.translation = next_position;
+                // Read the forward direction from the current transform.
+                let forward = {
+                    let p0 = queries.p0();
+                    let (_, tf, _, _) = p0.get(entity).unwrap();
+                    tf.forward().as_vec3()
+                };
+                let right = forward.cross(Vec3::Y).normalize() * -1.0;
+
+                // Swept collision check against ALL colliders (including other movers).
+                let blocked = {
+                    let collider_query = queries.p1();
+                    check_swept_collision(entity, start, target, col_size, &collider_query)
+                };
+
+                if blocked {
+                    debug!("Swept path blocked: {:?} -> {:?}", start, target);
+                    queries.p0().get_mut(entity).unwrap().2.movement_delta = Vec3::ZERO;
+                    continue;
                 }
 
+                // Diagonal corner-clip check.
+                let movement_vec = movement_delta * grid_unit;
+                let forward_component = movement_vec.dot(forward) * forward;
+                let right_component = movement_vec.dot(right) * right;
+
+                if forward_component.length_squared() > 0.01 && right_component.length_squared() > 0.01 {
+                    let forward_target = start + forward_component;
+                    let right_target = start + right_component;
+
+                    let diag_blocked = {
+                        let collider_query = queries.p1();
+                        check_swept_collision(entity, start, forward_target, col_size, &collider_query)
+                            || check_swept_collision(entity, start, right_target, col_size, &collider_query)
+                    };
+
+                    if diag_blocked {
+                        debug!("Diagonal swept blocked");
+                        queries.p0().get_mut(entity).unwrap().2.movement_delta = Vec3::ZERO;
+                        continue;
+                    }
+                }
+
+                // Commit movement.
+                let mut query_p0 = queries.p0();
+                let (_, tf, mut mov, _) = query_p0.get_mut(entity).unwrap();
+                mov.start_position = start;
+                mov.target_position = target;
+                mov.lerp_progress = 0.0;
+                mov.state = MovementState::MovingToTarget;
+                mov.movement_delta = Vec3::ZERO;
+                trace!(
+                    "Move start: from={:?} to={:?} collider={:?}",
+                    start, target, col_size
+                );
+                let _ = tf; // suppress unused warning; translation updated in MovingToTarget arm
+            }
+            MovementState::MovingToTarget => {
+                let mut query_p0 = queries.p0();
+                let (_, mut tf, mut mov, _) = query_p0.get_mut(entity).unwrap();
+                let _ = lerp_progress; // we re-read from the component
+                if mov.lerp_progress < 1.0 {
+                    let next_progress = (mov.lerp_progress + lerp_speed * delta_time).min(1.0);
+                    let next_position = mov.start_position.lerp(mov.target_position, next_progress);
+                    trace!(
+                        "Move step: progress={:.3} next={:?} target={:?}",
+                        next_progress, next_position, mov.target_position
+                    );
+                    mov.lerp_progress = next_progress;
+                    tf.translation = next_position;
+                }
                 if mov.lerp_progress >= 1.0 {
-                    // Movement complete
-                    transform.translation = mov.target_position;
+                    tf.translation = mov.target_position;
                     mov.state = MovementState::Idle;
                 }
             }

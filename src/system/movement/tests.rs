@@ -1,5 +1,6 @@
 use super::*;
     use bevy::ecs::system::SystemState;
+    use bevy::ecs::system::ParamSet;
     use crate::{PlayerConfig, CameraConfig, DebugConfig};
 
     fn make_test_config() -> GameConfig {
@@ -75,16 +76,18 @@ use super::*;
     fn check_swept_collision_static_overlap_hit() {
         // A zero-length sweep (start == end) should detect a direct overlap.
         let mut world = World::new();
-        world.spawn((
+        let obstacle = world.spawn((
             Transform::from_translation(Vec3::ZERO),
             Collider { size: Vec3::splat(1.0) },
-        ));
+        )).id();
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        assert!(check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
+        assert!(check_swept_collision(mover, Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
+        let _ = obstacle;
     }
 
     #[test]
@@ -95,29 +98,49 @@ use super::*;
             Transform::from_translation(Vec3::ZERO),
             Collider { size: Vec3::splat(1.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        assert!(!check_swept_collision(Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0), Vec3::splat(1.0), &query));
+        assert!(!check_swept_collision(mover, Vec3::new(3.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0), Vec3::splat(1.0), &query));
     }
 
     #[test]
-    fn check_swept_collision_ignores_lerp_movement_entities() {
-        // Entities with LerpMovement should be excluded from swept checks.
+    fn check_swept_collision_ignores_self() {
+        // An entity should never collide with itself.
+        let mut world = World::new();
+        let mover = world.spawn((
+            Transform::from_translation(Vec3::ZERO),
+            Collider { size: Vec3::splat(1.0) },
+        )).id();
+
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
+            SystemState::new(&mut world);
+        let query = state.get(&world);
+
+        // The only collider in the world is the mover itself — should be no collision.
+        assert!(!check_swept_collision(mover, Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
+    }
+
+    #[test]
+    fn check_swept_collision_includes_moving_entities() {
+        // Moving entities (those with LerpMovement) must not be ignored.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::ZERO),
             Collider { size: Vec3::splat(1.0) },
             make_lerp_movement(),
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        assert!(!check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
+        // The obstacle has LerpMovement but should still block the sweep.
+        assert!(check_swept_collision(mover, Vec3::ZERO, Vec3::ZERO, Vec3::splat(1.0), &query));
     }
 
     #[test]
@@ -132,12 +155,13 @@ use super::*;
             Transform::from_translation(Vec3::new(0.6, 0.0, 0.0)),
             Collider { size: Vec3::splat(1.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        assert!(check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(0.5), &query));
+        assert!(check_swept_collision(mover, Vec3::ZERO, Vec3::ZERO, Vec3::splat(0.5), &query));
     }
 
     #[test]
@@ -152,12 +176,13 @@ use super::*;
             Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
             Collider { size: Vec3::splat(1.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        assert!(!check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::splat(0.5), &query));
+        assert!(!check_swept_collision(mover, Vec3::ZERO, Vec3::ZERO, Vec3::splat(0.5), &query));
     }
 
     #[test]
@@ -168,12 +193,13 @@ use super::*;
             Transform::from_translation(Vec3::new(0.5, 0.0, 0.0)),
             Collider { size: Vec3::new(0.1, 2.0, 2.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        assert!(check_swept_collision(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::splat(1.0), &query));
+        assert!(check_swept_collision(mover, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::splat(1.0), &query));
     }
 
     #[test]
@@ -181,43 +207,36 @@ use super::*;
         // A sweep that starts fully past a thin wall should not collide.
         let mut world = World::new();
         world.spawn((
-            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+            Transform::from_translation(Vec3::ZERO),
             Collider { size: Vec3::new(0.1, 2.0, 2.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        // Moving from x=1 to x=2 — wall at x=0 is behind the mover
-        assert!(!check_swept_collision(Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), Vec3::splat(1.0), &query));
+        // Moving from x=1 to x=2 — wall at x=0 is behind the mover.
+        assert!(!check_swept_collision(mover, Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 0.0, 0.0), Vec3::splat(1.0), &query));
     }
 
     #[test]
     fn check_swept_collision_face_touch_is_not_collision() {
-        // A static mover whose face exactly touches an obstacle face should not collide.
-        // Obstacle at x=1.5, size 1 → left face at x=1.0.
-        // Mover at x=0, size 2 → right face at x=1.0.
-        // Expanded half = (1.0 + 2.0) * 0.5 = 1.5 → expanded box: [0.0, 3.0].
-        // Zero-length sweep at x=0: s=0, lo=0.0, hi=3.0 → s is inside slab, no exclusion.
-        // Wait — that overlaps. Use exact non-overlapping placement instead:
-        // Obstacle at x=2, size 2 → edges at [1, 3].
-        // Mover size 2 → expanded: [0, 4].
-        // Zero-length sweep at x=0: start is inside expanded box → collision.
-        // Correct approach: mover centre at x=-1, sweep to x=0; expanded left edge at 0.
-        // t_enter = (0 - (-1)) / 1 = 1.0, which is NOT < 1.0 → no collision.
+        // A sweep whose leading face exactly meets an obstacle face should not collide.
+        // Obstacle at x=2, size 2 → left face at x=1. Mover size 2 → expanded left edge at 0.
+        // Sweep from x=-1 to x=0: t_enter = (0 - (-1)) / 1 = 1.0, strict < 1.0 excludes it.
         let mut world = World::new();
         world.spawn((
             Transform::from_translation(Vec3::new(2.0, 0.0, 0.0)),
             Collider { size: Vec3::new(2.0, 2.0, 2.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
-        // Sweep from (-1,0,0) to (0,0,0): t_enter == 1.0 exactly, strict < 1.0 excludes it.
-        assert!(!check_swept_collision(Vec3::new(-1.0, 0.0, 0.0), Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0), &query));
+        assert!(!check_swept_collision(mover, Vec3::new(-1.0, 0.0, 0.0), Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0), &query));
     }
 
     #[test]
@@ -228,13 +247,14 @@ use super::*;
             Transform::from_translation(Vec3::new(1.99, 0.0, 1.99)),
             Collider { size: Vec3::new(2.0, 2.0, 2.0) },
         ));
+        let mover = world.spawn_empty().id();
 
-        let mut state: SystemState<Query<(&Transform, &Collider), Without<LerpMovement>>> =
+        let mut state: SystemState<Query<(Entity, &Transform, &Collider)>> =
             SystemState::new(&mut world);
         let query = state.get(&world);
 
         // Zero-length sweep: mover (size 2) at origin overlaps obstacle at (1.99, 0, 1.99).
-        assert!(check_swept_collision(Vec3::ZERO, Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0), &query));
+        assert!(check_swept_collision(mover, Vec3::ZERO, Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0), &query));
     }
 
     #[test]
@@ -259,13 +279,15 @@ use super::*;
         let mut update_state: SystemState<(
             Res<Time>,
             Res<GameConfig>,
-            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-            Query<(&Transform, &Collider), Without<LerpMovement>>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
         )> = SystemState::new(&mut world);
 
         // First update: should initiate movement
-        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
-        update_lerp_movement(time, config, moving_query, collider_query);
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
         update_state.apply(&mut world);
 
         let movement = world.get::<LerpMovement>(entity).unwrap();
@@ -296,12 +318,14 @@ use super::*;
         let mut update_state: SystemState<(
             Res<Time>,
             Res<GameConfig>,
-            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-            Query<(&Transform, &Collider), Without<LerpMovement>>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
         )> = SystemState::new(&mut world);
 
-        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
-        update_lerp_movement(time, config, moving_query, collider_query);
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
         update_state.apply(&mut world);
 
         let movement = world.get::<LerpMovement>(entity).unwrap();
@@ -338,12 +362,14 @@ use super::*;
         let mut update_state: SystemState<(
             Res<Time>,
             Res<GameConfig>,
-            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-            Query<(&Transform, &Collider), Without<LerpMovement>>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
         )> = SystemState::new(&mut world);
 
-        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
-        update_lerp_movement(time, config, moving_query, collider_query);
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
         update_state.apply(&mut world);
 
         let transform = world.get::<Transform>(entity).unwrap();
@@ -382,12 +408,14 @@ use super::*;
         let mut update_state: SystemState<(
             Res<Time>,
             Res<GameConfig>,
-            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-            Query<(&Transform, &Collider), Without<LerpMovement>>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
         )> = SystemState::new(&mut world);
 
-        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
-        update_lerp_movement(time, config, moving_query, collider_query);
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
         update_state.apply(&mut world);
 
         let movement = world.get::<LerpMovement>(entity).unwrap();
@@ -419,12 +447,14 @@ use super::*;
         let mut update_state: SystemState<(
             Res<Time>,
             Res<GameConfig>,
-            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-            Query<(&Transform, &Collider), Without<LerpMovement>>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
         )> = SystemState::new(&mut world);
 
-        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
-        update_lerp_movement(time, config, moving_query, collider_query);
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
         update_state.apply(&mut world);
 
         let transform = world.get::<Transform>(entity).unwrap();
@@ -535,12 +565,14 @@ use super::*;
         let mut update_state: SystemState<(
             Res<Time>,
             Res<GameConfig>,
-            Query<(&mut Transform, &mut LerpMovement, &Collider)>,
-            Query<(&Transform, &Collider), Without<LerpMovement>>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
         )> = SystemState::new(&mut world);
 
-        let (time, config, moving_query, collider_query) = update_state.get_mut(&mut world);
-        update_lerp_movement(time, config, moving_query, collider_query);
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
         update_state.apply(&mut world);
 
         let transform = world.get::<Transform>(entity).unwrap();
