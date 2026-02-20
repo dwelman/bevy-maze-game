@@ -149,16 +149,17 @@ pub fn handle_player_input(
     }
 }
 
-/// Check if sweeping a collider along a straight path from `start` to `end` would
-/// intersect any other collider at any point along the way.
+/// Check if sweeping a collider of `size` from `start` to `end` would overlap
+/// any other collider at any point along the path.
 ///
 /// `self_entity` is excluded so an entity cannot collide with itself.
 /// All other entities with a `Collider` are tested — including those that are
 /// also moving — so turn-based entities block each other's intended destinations.
 ///
-/// Uses a ray-vs-expanded-AABB test (Minkowski sum): each obstacle is grown by
-/// half the mover's size on every axis, and then we test whether the ray from
-/// `start` to `end` passes through that expanded box.
+/// Samples N evenly-spaced positions along the path and performs a plain AABB
+/// overlap test at each. N is chosen so the step between samples is always
+/// smaller than the thinnest obstacle (WALL_T = 0.1) plus the mover's half-extent
+/// in the movement direction, guaranteeing no obstacle is skipped.
 fn check_swept_collision(
     self_entity: Entity,
     start: Vec3,
@@ -166,55 +167,54 @@ fn check_swept_collision(
     size: Vec3,
     collider_query: &Query<(Entity, &Transform, &Collider)>,
 ) -> bool {
+    const MIN_OBSTACLE_THICKNESS: f32 = 0.1;
+
     let delta = end - start;
+    let dist = delta.length();
 
-    for (entity, other_transform, other_collider) in collider_query.iter() {
-        if entity == self_entity {
-            continue;
-        }
-        let obs_pos = other_transform.translation;
-        // Expand obstacle by half the mover's extents on every axis
-        let expanded_half = (other_collider.size + size) * 0.5;
+    // Project the mover's half-extent onto the movement direction so we know
+    // how much of the collider leads into a potential obstacle along that axis.
+    let mover_half_extent = if dist > f32::EPSILON {
+        let dir = delta / dist;
+        (size * 0.5).dot(dir.abs())
+    } else {
+        0.0
+    };
 
-        let obs_min = obs_pos - expanded_half;
-        let obs_max = obs_pos + expanded_half;
+    // Step must be small enough that we cannot skip through the thinnest wall.
+    let step_size = MIN_OBSTACLE_THICKNESS + mover_half_extent;
+    let n = if dist > f32::EPSILON {
+        ((dist / step_size).ceil() as usize).max(1) + 1
+    } else {
+        1
+    };
 
-        // Slab test: find the interval [t_enter, t_exit] where the ray is inside
-        // the expanded box.  A zero-length delta component is handled by checking
-        // whether the start point is within the slab on that axis.
-        let mut t_enter = 0.0_f32;
-        let mut t_exit = 1.0_f32;
+    for i in 0..n {
+        let t = if n == 1 { 0.0 } else { i as f32 / (n - 1) as f32 };
+        let sample = start + delta * t;
 
-        for axis in 0..3 {
-            let d = delta[axis];
-            let s = start[axis];
-            let lo = obs_min[axis];
-            let hi = obs_max[axis];
+        let mover_min = sample - size * 0.5;
+        let mover_max = sample + size * 0.5;
 
-            if d.abs() < f32::EPSILON {
-                // Ray is parallel to the slab on this axis
-                if s < lo || s > hi {
-                    // Entirely outside — no intersection possible
-                    t_enter = f32::INFINITY;
-                    break;
-                }
-                // Otherwise the ray is inside this slab for its whole length;
-                // just continue to the next axis.
-            } else {
-                let t1 = (lo - s) / d;
-                let t2 = (hi - s) / d;
-                let (t_near, t_far) = if t1 < t2 { (t1, t2) } else { (t2, t1) };
-                t_enter = t_enter.max(t_near);
-                t_exit = t_exit.min(t_far);
+        for (entity, other_transform, other_collider) in collider_query.iter() {
+            if entity == self_entity {
+                continue;
             }
-        }
+            let obs_pos = other_transform.translation;
+            let obs_min = obs_pos - other_collider.size * 0.5;
+            let obs_max = obs_pos + other_collider.size * 0.5;
 
-        if t_enter <= t_exit && t_enter < 1.0 && t_exit > 0.0 {
-            debug!(
-                "Swept collision: start={:?} end={:?} size={:?} obs_pos={:?} obs_size={:?} t_enter={:.3}",
-                start, end, size, obs_pos, other_collider.size, t_enter
-            );
-            return true;
+            let overlaps = mover_max.x > obs_min.x && mover_min.x < obs_max.x
+                && mover_max.y > obs_min.y && mover_min.y < obs_max.y
+                && mover_max.z > obs_min.z && mover_min.z < obs_max.z;
+
+            if overlaps {
+                debug!(
+                    "Swept collision at t={:.2}: sample={:?} size={:?} obs_pos={:?} obs_size={:?}",
+                    t, sample, size, obs_pos, other_collider.size
+                );
+                return true;
+            }
         }
     }
     false

@@ -10,7 +10,9 @@ use super::*;
                 lerp_speed: 2.0,
                 rotation_lerp_speed: 4.0,
                 input_repeat_delay: 0.2,
-                collider_size: [1.0, 1.0, 1.0],
+                creature_height: 1.75,
+                creature_width: 0.6,
+                eye_height: 1.55,
             },
             camera: CameraConfig {
                 look_mode: crate::LookMode::Relative,
@@ -617,4 +619,72 @@ use super::*;
         assert!(rotation.lerp_progress > 0.5);
         assert!(rotation.lerp_progress < 1.0);
         assert_eq!(rotation.target_rotation, target_rot);
+    }
+
+    #[test]
+    fn horizontal_move_not_blocked_by_wall_panel_above_doorway() {
+        // A creature (height=1.75) walking through a 2-cell-tall doorway must not
+        // be blocked by the wall panel belonging to the cell directly above the
+        // opening.
+        //
+        // Grid layout (grid_unit = 1.0, doorway in South wall at z=2):
+        //   Cell (0,0,1) - destination, South face is open (doorway)
+        //   Cell (0,2,1) - above doorway, South face wall panel at z=1.5, y=2.0
+        //
+        // The above-doorway panel's collider spans y=[1.5, 2.5].
+        // Without the Y-axis skip, the Minkowski expansion pulls its lower
+        // boundary down to y=0.625, falsely blocking the creature at y=0.875.
+        //
+        // The creature sweeps from cell (0,0,0) → (0,0,1), i.e. z=0 → z=1.
+        // The panel's Z centre is at z=1.5 (South face of cell z=1), so the
+        // sweep endpoint (z=1) stops short of the panel in XZ — there is no
+        // XZ collision either. The only false collision path was through Y.
+        let mut world = World::new();
+        world.insert_resource(make_test_config());
+        world.insert_resource(make_test_time());
+
+        // South-face wall panel for the cell above the doorway:
+        // cell y=2, z=1 → panel centred at (0, 2.0, 1.5), size (1.0, 1.0, 0.1).
+        world.spawn((
+            Transform::from_translation(Vec3::new(0.0, 2.0, 1.5)),
+            Collider { size: Vec3::new(1.0, 1.0, 0.1) },
+        ));
+
+        // Creature height 1.75 — centre sits at y = 1.75/2 = 0.875.
+        let creature_height = 1.75_f32;
+        let start = Vec3::new(0.0, creature_height * 0.5, 0.0);
+        let end   = Vec3::new(0.0, creature_height * 0.5, 1.0);
+
+        let entity = world.spawn((
+            Transform::from_translation(start),
+            Collider { size: Vec3::new(0.6, creature_height, 0.6) },
+            LerpMovement {
+                state: MovementState::Idle,
+                movement_delta: Vec3::new(0.0, 0.0, 1.0),
+                target_position: start,
+                start_position: start,
+                lerp_progress: 1.0,
+            },
+        )).id();
+
+        let mut update_state: SystemState<(
+            Res<Time>,
+            Res<GameConfig>,
+            ParamSet<(
+                Query<(Entity, &mut Transform, &mut LerpMovement, &Collider)>,
+                Query<(Entity, &Transform, &Collider)>,
+            )>,
+        )> = SystemState::new(&mut world);
+
+        let (time, config, queries) = update_state.get_mut(&mut world);
+        update_lerp_movement(time, config, queries);
+        update_state.apply(&mut world);
+
+        let movement = world.get::<LerpMovement>(entity).unwrap();
+
+        // The panel is above the doorway and outside the sweep path — must not block.
+        assert_eq!(movement.state, MovementState::MovingToTarget,
+            "creature should move through the doorway, not be blocked by the panel above it");
+        assert_eq!(movement.target_position, end,
+            "target should be one cell south");
     }

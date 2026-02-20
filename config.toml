@@ -11,8 +11,16 @@ rotation_lerp_speed = 3.0
 # Delay in seconds before repeating movement input when button is held
 input_repeat_delay = 0.15
 
-# Player collider size [x, y, z] - should be slightly smaller than grid_unit to prevent camera clipping
-collider_size = [0.6, 1.95, 0.6]
+# Total height of the player creature in world units.
+# A value > 1.0 means the creature occupies more than one cell vertically.
+creature_height = 1.75
+
+# Width (and depth) of the player creature's collider in world units.
+# Should be slightly smaller than grid_unit to avoid clipping through walls.
+creature_width = 0.6
+
+# Height above the creature's feet where the camera (eyes) sit, in world units.
+eye_height = 1.55
 
 [camera]
 # Look mode: "relative" (follows mouse movement) or "absolute" (looks at cursor position)
