@@ -4,10 +4,8 @@ use bevy::log::LogPlugin;
 use serde::Deserialize;
 use std::fs;
 
-mod entity;
 mod system;
 
-use entity::{CreatureDef, spawn_creature};
 use system::camera::{
     handle_camera_look, toggle_camera_look_mode, update_camera_look_lerp, CameraLook,
 };
@@ -183,16 +181,13 @@ fn main() {
 }
 
 #[derive(Component)]
-struct Player;
-
-#[derive(Component)]
 struct DebugText;
 
 fn setup(
     mut commands: Commands,
     mut _meshes: ResMut<Assets<Mesh>>,
     mut _materials: ResMut<Assets<StandardMaterial>>,
-    config: Res<GameConfig>,
+    _config: Res<GameConfig>,
 ) {
     commands.spawn((
         PointLight {
@@ -204,40 +199,18 @@ fn setup(
         Transform::from_xyz(2.0, 4.0, 2.0),
     ));
 
-    // Build the player creature definition from config.
-    let player_def = CreatureDef {
-        height:     config.player.creature_height,
-        width:      config.player.creature_width,
-        eye_height: config.player.eye_height,
-    };
-
-    // Spawn the player creature at the bottom cell (2, 0, 2).
-    // spawn_creature places feet at y = 0 (floor of cell y=0) and centres the
-    // entity transform at y = height / 2.
-    let player = spawn_creature(
-        &mut commands,
-        IVec3::new(2, -1, 2),
-        config.player.grid_unit,
-        &player_def,
-    );
-
-    // Tag as player and attach camera as a child.
-    // Camera local Y offset = eye_height - height/2  (converts from feet-relative
-    // eye_height to the entity-centred local space).
-    let camera_local_y = player_def.eye_height - player_def.height * 0.5;
-    commands.entity(player).insert(Player).with_children(|parent| {
-        parent.spawn((
-            Camera3d::default(),
-            CameraLook {
-                yaw: 0.0,
-                pitch: 0.0,
-                target_yaw: 0.0,
-                target_pitch: 0.0,
-            },
-            Transform::from_xyz(0.0, camera_local_y, 0.0)
-                .looking_at(Vec3::new(0.0, camera_local_y, -1.0), Vec3::Y),
-        ));
-    });
+    // Camera
+    commands.spawn((
+        Camera3d::default(),
+        CameraLook {
+            yaw: 0.0,
+            pitch: 0.0,
+            target_yaw: 0.0,
+            target_pitch: 0.0,
+        },
+        Transform::from_xyz(2.0, 1.6, 2.0)
+            .looking_at(Vec3::new(2.0, 1.6, 1.0), Vec3::Y),
+    ));
 
     // Debug text UI
     commands.spawn((
@@ -258,17 +231,12 @@ fn setup(
 }
 
 fn update_debug_text(
-    player_query: Query<&Transform, With<Player>>,
     camera_query: Query<(&Transform, &CameraLook), With<Camera3d>>,
     look_mode: Res<CameraLookMode>,
     config: Res<GameConfig>,
     mut debug_text_query: Query<&mut Text, With<DebugText>>,
 ) {
-    let Ok(player_transform) = player_query.single() else {
-        return;
-    };
-
-    let Ok((_camera_transform, camera_look)) = camera_query.single() else {
+    let Ok((camera_transform, camera_look)) = camera_query.single() else {
         return;
     };
 
@@ -277,9 +245,7 @@ fn update_debug_text(
         Err(_) => return,
     };
 
-    let pos = player_transform.translation;
-    let rot = player_transform.rotation;
-    let euler = rot.to_euler(bevy::math::EulerRot::YXZ);
+    let pos = camera_transform.translation;
 
     let look_mode_str = match look_mode.0 {
         LookMode::Relative => "Relative",
@@ -288,27 +254,17 @@ fn update_debug_text(
 
     debug_text.0 = format!(
         "CONTROLS:\n\
-         {} / {} / {} / {} - Move | {} / {} - Rotate | {} - Look | {} - Toggle Look Mode\n\
+         {} - Look | {} - Toggle Look Mode\n\
          \n\
          LOOK MODE: {}\n\
          \n\
-         PLAYER:\n\
-         Pos: ({:.2}, {:.2}, {:.2})\n\
-         Rot: ({:.2}, {:.2}, {:.2})\n\
-         \n\
          CAMERA:\n\
+         Pos: ({:.2}, {:.2}, {:.2})\n\
          Yaw: {:.2} degrees | Pitch: {:.2} degrees",
-        config.controls.move_forward,
-        config.controls.move_left,
-        config.controls.move_backward,
-        config.controls.move_right,
-        config.controls.rotate_left,
-        config.controls.rotate_right,
         config.controls.look_hold,
         config.controls.look_mode_toggle,
         look_mode_str,
         pos.x, pos.y, pos.z,
-        euler.0.to_degrees(), euler.1.to_degrees(), euler.2.to_degrees(),
         (camera_look.yaw).to_degrees(),
         (camera_look.pitch).to_degrees(),
     );
