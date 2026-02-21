@@ -114,4 +114,11 @@ impl CellGraph {
     pub fn cells(&self) -> impl Iterator<Item = &Cell> + '_ {
         self.cells.values()
     }
+
+    /// Returns the floor height (bottom Y coordinate) for a given cell
+    pub fn get_cell_floor_height(&self, cell_id: CellId) -> Option<f32> {
+        self.cells.get(&cell_id).map(|cell| {
+            cell.position().y - self.cell_size / 2.0
+        })
+    }
 }

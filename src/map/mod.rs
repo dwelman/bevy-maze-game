@@ -6,4 +6,4 @@ pub mod wall;
 pub use cell::{Cell, CellId};
 pub use direction::Direction;
 pub use graph::CellGraph;
-pub use wall::{spawn_cell_walls, CellWall};
+pub use wall::spawn_cell_walls;

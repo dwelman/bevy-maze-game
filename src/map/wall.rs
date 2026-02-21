@@ -58,39 +58,39 @@ fn calculate_wall_geometry(direction: Direction, cell_size: f32) -> (Vec3, Vec3)
 
     match direction {
         Direction::North => {
-            // Wall on +Z face
+            // Wall on +Z face - extend outward from cell boundary
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
-            let offset = Vec3::new(0.0, 0.0, half_cell);
+            let offset = Vec3::new(0.0, 0.0, half_cell + WALL_THICKNESS / 2.0);
             (size, offset)
         }
         Direction::South => {
-            // Wall on -Z face
+            // Wall on -Z face - extend outward from cell boundary
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
-            let offset = Vec3::new(0.0, 0.0, -half_cell);
+            let offset = Vec3::new(0.0, 0.0, -half_cell - WALL_THICKNESS / 2.0);
             (size, offset)
         }
         Direction::East => {
-            // Wall on +X face
+            // Wall on +X face - extend outward from cell boundary
             let size = Vec3::new(WALL_THICKNESS, cell_size, cell_size);
-            let offset = Vec3::new(half_cell, 0.0, 0.0);
+            let offset = Vec3::new(half_cell + WALL_THICKNESS / 2.0, 0.0, 0.0);
             (size, offset)
         }
         Direction::West => {
-            // Wall on -X face
+            // Wall on -X face - extend outward from cell boundary
             let size = Vec3::new(WALL_THICKNESS, cell_size, cell_size);
-            let offset = Vec3::new(-half_cell, 0.0, 0.0);
+            let offset = Vec3::new(-half_cell - WALL_THICKNESS / 2.0, 0.0, 0.0);
             (size, offset)
         }
         Direction::Up => {
-            // Wall on +Y face (ceiling)
+            // Wall on +Y face (ceiling) - extend upward from ceiling level
             let size = Vec3::new(cell_size, WALL_THICKNESS, cell_size);
-            let offset = Vec3::new(0.0, half_cell, 0.0);
+            let offset = Vec3::new(0.0, half_cell + WALL_THICKNESS / 2.0, 0.0);
             (size, offset)
         }
         Direction::Down => {
-            // Wall on -Y face (floor)
+            // Wall on -Y face (floor) - extend downward from floor level
             let size = Vec3::new(cell_size, WALL_THICKNESS, cell_size);
-            let offset = Vec3::new(0.0, -half_cell, 0.0);
+            let offset = Vec3::new(0.0, -half_cell - WALL_THICKNESS / 2.0, 0.0);
             (size, offset)
         }
     }
