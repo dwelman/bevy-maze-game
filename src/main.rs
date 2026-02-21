@@ -5,13 +5,16 @@ use serde::Deserialize;
 use std::fs;
 
 mod system;
+mod map;
 
 use system::camera::{
     handle_camera_look, toggle_camera_look_mode, update_camera_look_lerp, CameraLook,
 };
 use system::movement::{
     handle_player_input, update_lerp_movement, update_lerp_rotation,
+    Collider, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
+use map::{CellGraph, spawn_cell_walls};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -173,7 +176,8 @@ fn main() {
         .insert_resource(config.clone())
         .insert_resource(controls)
         .insert_resource(CameraLookMode(config.camera.look_mode.clone()))
-        .add_systems(Startup, setup)
+        .insert_resource(CellGraph::new(5.0))
+        .add_systems(Startup, (setup, setup_corridor, spawn_cell_walls).chain())
         .add_systems(Update, (handle_player_input, update_lerp_movement, update_lerp_rotation))
         .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
         .add_systems(Update, update_debug_text)
@@ -183,23 +187,46 @@ fn main() {
 #[derive(Component)]
 struct DebugText;
 
+#[derive(Component)]
+struct Player;
+
 fn setup(
     mut commands: Commands,
     mut _meshes: ResMut<Assets<Mesh>>,
     mut _materials: ResMut<Assets<StandardMaterial>>,
-    _config: Res<GameConfig>,
+    config: Res<GameConfig>,
 ) {
-    commands.spawn((
-        PointLight {
-            shadows_enabled: true,
-            intensity: 2_000_000.0,
-            range: 20.0,
-            ..default()
-        },
-        Transform::from_xyz(2.0, 4.0, 2.0),
-    ));
+    let creature_width = config.player.creature_width;
+    let creature_height = config.player.creature_height;
+    let eye_height = config.player.eye_height;
 
-    // Camera
+    // Player entity (parent) - handles movement, rotation, and collision
+    let player = commands.spawn((
+        Player,
+        Transform::from_xyz(0.0, 0.0, 0.0)
+            .looking_at(Vec3::new(1.0, 0.0, 0.0), Vec3::Y), 
+        LerpMovement {
+            state: MovementState::Idle,
+            movement_delta: Vec3::ZERO,
+            target_position: Vec3::new(0.0, 0.0, 0.0),
+            start_position: Vec3::new(0.0, 0.0, 0.0),
+            lerp_progress: 0.0,
+        },
+        LerpRotation {
+            rotation_delta: 0.0,
+            target_rotation: Quat::from_rotation_y(-90.0_f32.to_radians()),
+            lerp_progress: 0.0,
+        },
+        InputRepeatTimer {
+            movement_timer: 0.0,
+            rotation_timer: 0.0,
+        },
+        Collider {
+            size: Vec3::new(creature_width, creature_height, creature_width),
+        },
+    )).id();
+
+    // Camera entity (child) - positioned at eye height, inherits parent rotation
     commands.spawn((
         Camera3d::default(),
         CameraLook {
@@ -208,9 +235,8 @@ fn setup(
             target_yaw: 0.0,
             target_pitch: 0.0,
         },
-        Transform::from_xyz(2.0, 1.6, 2.0)
-            .looking_at(Vec3::new(2.0, 1.6, 1.0), Vec3::Y),
-    ));
+        Transform::from_xyz(0.0, eye_height, 0.0),
+    )).set_parent_in_place(player);
 
     // Debug text UI
     commands.spawn((
@@ -230,13 +256,54 @@ fn setup(
     ));
 }
 
+fn setup_corridor(
+    mut commands: Commands,
+    mut graph: ResMut<CellGraph>,
+) {
+    use map::Direction;
+
+    let cell_size = graph.cell_size();
+
+    // Create 5 cells: 3 in a straight line (East), then 2 branching (North and South)
+    let cell_0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
+    let cell_1 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0));
+    let cell_2 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, 0.0));
+    let cell_3 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, cell_size));  // North from cell_2
+    let cell_4 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, -cell_size)); // South from cell_2
+
+    // Connect the corridor: 0 -> 1 -> 2, then 2 -> 3 and 2 -> 4
+    graph.connect_cells(cell_0, Direction::East, cell_1);
+    graph.connect_cells(cell_1, Direction::East, cell_2);
+    graph.connect_cells(cell_2, Direction::North, cell_3);
+    graph.connect_cells(cell_2, Direction::South, cell_4);
+
+    // Spawn a weak point light in each cell
+    for cell in graph.cells() {
+        let position = cell.position();
+        commands.spawn((
+            PointLight {
+                shadows_enabled: true,
+                intensity: 500_000.0,  // Weaker than before
+                range: 10.0,
+                ..default()
+            },
+            Transform::from_xyz(position.x, position.y + 2.0, position.z), // 2 units above cell center
+        ));
+    }
+}
+
 fn update_debug_text(
-    camera_query: Query<(&Transform, &CameraLook), With<Camera3d>>,
+    player_query: Query<&Transform, With<Player>>,
+    camera_query: Query<&CameraLook, With<Camera3d>>,
     look_mode: Res<CameraLookMode>,
     config: Res<GameConfig>,
     mut debug_text_query: Query<&mut Text, With<DebugText>>,
 ) {
-    let Ok((camera_transform, camera_look)) = camera_query.single() else {
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+
+    let Ok(camera_look) = camera_query.single() else {
         return;
     };
 
@@ -245,7 +312,8 @@ fn update_debug_text(
         Err(_) => return,
     };
 
-    let pos = camera_transform.translation;
+    let pos = player_transform.translation;
+    let forward = player_transform.forward();
 
     let look_mode_str = match look_mode.0 {
         LookMode::Relative => "Relative",
@@ -258,13 +326,15 @@ fn update_debug_text(
          \n\
          LOOK MODE: {}\n\
          \n\
-         CAMERA:\n\
+         PLAYER:\n\
          Pos: ({:.2}, {:.2}, {:.2})\n\
+         Facing: ({:.2}, {:.2}, {:.2})\n\
          Yaw: {:.2} degrees | Pitch: {:.2} degrees",
         config.controls.look_hold,
         config.controls.look_mode_toggle,
         look_mode_str,
         pos.x, pos.y, pos.z,
+        forward.x, forward.y, forward.z,
         (camera_look.yaw).to_degrees(),
         (camera_look.pitch).to_degrees(),
     );
