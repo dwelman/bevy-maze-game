@@ -11,8 +11,8 @@ use system::camera::{
     handle_camera_look, toggle_camera_look_mode, update_camera_look_lerp, CameraLook,
 };
 use system::movement::{
-    handle_player_input, update_lerp_movement, update_lerp_rotation,
-    Collider, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
+    handle_player_input, update_lerp_rotation, update_cell_movement,
+    Collider, CellMovement, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
 use map::{CellGraph, spawn_cell_walls};
 
@@ -183,7 +183,7 @@ fn main() {
         })
         .insert_resource(DebugVisible(false))
         .add_systems(Startup, (setup_corridor, setup, spawn_cell_walls, spawn_door).chain())
-        .add_systems(Update, (handle_player_input, update_lerp_movement, update_lerp_rotation))
+        .add_systems(Update, (handle_player_input, update_cell_movement, update_lerp_rotation))
         .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
         .add_systems(Update, (check_door_click, update_door_message, update_door_message_ui))
         .add_systems(Update, (toggle_debug_text, update_debug_text))
@@ -220,7 +220,6 @@ fn setup(
     config: Res<GameConfig>,
     graph: Res<CellGraph>,
 ) {
-    let creature_width = config.player.creature_width;
     let creature_height = config.player.creature_height;
     let eye_height = config.player.eye_height;
 
@@ -256,8 +255,8 @@ fn setup(
             movement_timer: 0.0,
             rotation_timer: 0.0,
         },
-        Collider {
-            size: Vec3::new(creature_width, creature_height, creature_width),
+        CellMovement {
+            current_cell: starting_cell.id(),
         },
     )).id();
 
