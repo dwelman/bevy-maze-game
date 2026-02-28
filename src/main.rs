@@ -349,7 +349,8 @@ fn setup_corridor(
 fn toggle_debug_text(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut debug_visible: ResMut<DebugVisible>,
-    mut debug_text_query: Query<&mut Visibility, With<DebugText>>,
+    mut debug_text_query: Query<&mut Visibility, (With<DebugText>, Without<DoorMessageText>)>,
+    mut door_message_query: Query<&mut Visibility, (With<DoorMessageText>, Without<DebugText>)>,
 ) {
     if keyboard_input.just_pressed(KeyCode::Backquote) {
         debug_visible.0 = !debug_visible.0;
@@ -361,23 +362,30 @@ fn toggle_debug_text(
                 Visibility::Hidden
             };
         }
+
+        if let Ok(mut visibility) = door_message_query.single_mut() {
+            *visibility = if debug_visible.0 {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            };
+        }
     }
 }
 
 fn update_debug_text(
-    player_query: Query<&Transform, With<Player>>,
+    player_query: Query<(&Transform, &CellTransform), With<Player>>,
     camera_query: Query<&CameraLook, With<Camera3d>>,
     look_mode: Res<CameraLookMode>,
     config: Res<GameConfig>,
     debug_visible: Res<DebugVisible>,
     mut debug_text_query: Query<&mut Text, With<DebugText>>,
 ) {
-    // Skip update if debug is not visible
     if !debug_visible.0 {
         return;
     }
 
-    let Ok(player_transform) = player_query.single() else {
+    let Ok((player_transform, cell_tf)) = player_query.single() else {
         return;
     };
 
@@ -391,7 +399,6 @@ fn update_debug_text(
     };
 
     let pos = player_transform.translation;
-    let forward = player_transform.forward();
 
     let look_mode_str = match look_mode.0 {
         LookMode::Relative => "Relative",
@@ -406,13 +413,13 @@ fn update_debug_text(
          \n\
          PLAYER:\n\
          Pos: ({:.2}, {:.2}, {:.2})\n\
-         Facing: ({:.2}, {:.2}, {:.2})\n\
+         Cell: {:?} | Facing: {:?}\n\
          Yaw: {:.2} degrees | Pitch: {:.2} degrees",
         config.controls.look_hold,
         config.controls.look_mode_toggle,
         look_mode_str,
         pos.x, pos.y, pos.z,
-        forward.x, forward.y, forward.z,
+        cell_tf.cell, cell_tf.facing,
         (camera_look.yaw).to_degrees(),
         (camera_look.pitch).to_degrees(),
     );
