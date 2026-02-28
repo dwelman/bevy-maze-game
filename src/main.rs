@@ -12,9 +12,9 @@ use system::camera::{
 };
 use system::movement::{
     handle_player_input, update_lerp_rotation, update_cell_movement,
-    Collider, CellMovement, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
+    Collider, CellTransform, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
-use map::{CellGraph, spawn_cell_walls};
+use map::{CellGraph, Direction, spawn_cell_walls};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -255,8 +255,9 @@ fn setup(
             movement_timer: 0.0,
             rotation_timer: 0.0,
         },
-        CellMovement {
-            current_cell: starting_cell.id(),
+        CellTransform {
+            cell: starting_cell.id(),
+            facing: Direction::East,
         },
     )).id();
 
@@ -315,8 +316,6 @@ fn setup_corridor(
     mut commands: Commands,
     mut graph: ResMut<CellGraph>,
 ) {
-    use map::Direction;
-
     let cell_size = graph.cell_size();
 
     // Create 5 cells: 3 in a straight line (East), then 2 branching (North and South)
@@ -427,10 +426,8 @@ fn spawn_door(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    use map::Direction;
     use rand::prelude::*;
 
-    const WALL_THICKNESS: f32 = 0.1; // Match wall thickness from wall.rs
     const DOOR_THICKNESS: f32 = 0.2;
     const DOOR_WIDTH: f32 = 0.8;
     const DOOR_HEIGHT: f32 = 1.8;

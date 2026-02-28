@@ -18,7 +18,7 @@ pub enum MovementState {
 pub struct LerpMovement {
     /// The current state of movement
     pub state: MovementState,
-    /// Requested movement delta (set by input, consumed by movement system)
+    /// Requested movement direction (set by input, consumed by movement system)
     pub movement_delta: Vec3,
     /// The target position the player is moving towards
     pub target_position: Vec3,
@@ -46,47 +46,37 @@ pub struct InputRepeatTimer {
     pub rotation_timer: f32,
 }
 
-/// Cell-based movement component. Entities with this component move by checking
-/// open connections between cells rather than using swept collision detection.
+/// Stores the entity's current position in the cell graph and its cardinal facing
+/// direction. Both are kept up-to-date by the movement and rotation systems so that
+/// neither needs to be re-derived from the `Transform` quaternion at runtime.
 #[derive(Component)]
-pub struct CellMovement {
-    /// The cell the entity is currently standing in.
-    pub current_cell: CellId,
+pub struct CellTransform {
+    /// The cell the entity is currently occupying.
+    pub cell: CellId,
+    /// The cardinal direction the entity is facing (always N / S / E / W).
+    pub facing: Direction,
 }
 
-/// Maps a world-space movement vector to the most appropriate horizontal cardinal
-/// `Direction`, ignoring the Y component. Returns `None` for zero vectors.
-fn world_vec_to_direction(v: Vec3) -> Option<Direction> {
-    let x = v.x;
-    let z = v.z;
-    if x.abs() < f32::EPSILON && z.abs() < f32::EPSILON {
-        return None;
-    }
-    // Dominant axis wins; ties go to X (East/West)
-    if x.abs() >= z.abs() {
-        if x > 0.0 { Some(Direction::East) } else { Some(Direction::West) }
-    } else {
-        if z > 0.0 { Some(Direction::North) } else { Some(Direction::South) }
-    }
-}
+// ---------------------------------------------------------------------------
+// Systems
+// ---------------------------------------------------------------------------
 
-/// Moves entities that have a [`CellMovement`] component by checking open connections
-/// in the [`CellGraph`] rather than using swept collision detection.
+/// Moves entities that have a [`CellTransform`] component by checking open
+/// connections in the [`CellGraph`].
 ///
-/// When idle with a pending `movement_delta`, the system converts the world-space
-/// direction to a cardinal [`Direction`], verifies there is a connected neighbour cell,
-/// and initiates a lerp to that neighbour's centre position. Movement is blocked
-/// silently when no connection exists (i.e. there is a wall).
+/// The stored `facing` is used to resolve the input delta into an absolute
+/// cardinal [`Direction`] without touching the `Transform` quaternion.
+/// Movement is silently blocked when no connection exists (i.e. there is a wall).
 pub fn update_cell_movement(
     time: Res<Time>,
     config: Res<GameConfig>,
     cell_graph: Res<CellGraph>,
-    mut query: Query<(&mut Transform, &mut LerpMovement, &mut CellMovement)>,
+    mut query: Query<(&mut Transform, &mut LerpMovement, &mut CellTransform)>,
 ) {
     let lerp_speed = config.player.lerp_speed;
     let delta_time = time.delta_secs();
 
-    for (mut transform, mut lerp_mov, mut cell_mov) in &mut query {
+    for (mut transform, mut lerp_mov, mut cell_tf) in &mut query {
         match lerp_mov.state {
             MovementState::Idle => {
                 if lerp_mov.movement_delta == Vec3::ZERO {
@@ -96,16 +86,25 @@ pub fn update_cell_movement(
                 let delta = lerp_mov.movement_delta;
                 lerp_mov.movement_delta = Vec3::ZERO;
 
-                let Some(move_dir) = world_vec_to_direction(delta) else {
+                // Resolve the world-space delta into a cardinal direction using
+                // the stored facing — no quaternion math required.
+                let fwd_vec = cell_tf.facing.to_vec3(1.0);
+                let rgt_vec = cell_tf.facing.turn_left().to_vec3(1.0);
+                let fwd_dot = delta.dot(fwd_vec);
+                let rgt_dot = delta.dot(rgt_vec);
+
+                let target_dir = if fwd_dot.abs() >= rgt_dot.abs() {
+                    if fwd_dot >= 0.0 { cell_tf.facing } else { cell_tf.facing.opposite() }
+                } else {
+                    if rgt_dot >= 0.0 { cell_tf.facing.turn_left() } else { cell_tf.facing.turn_right() }
+                };
+
+                let Some(current_cell) = cell_graph.get_cell(cell_tf.cell) else {
                     continue;
                 };
 
-                let Some(current_cell) = cell_graph.get_cell(cell_mov.current_cell) else {
-                    continue;
-                };
-
-                let Some(neighbor_id) = current_cell.get_neighbor(move_dir) else {
-                    debug!("Cell movement blocked: no {:?} connection from {:?}", move_dir, cell_mov.current_cell);
+                let Some(neighbor_id) = current_cell.get_neighbor(target_dir) else {
+                    debug!("Cell movement blocked: no {:?} connection from {:?}", target_dir, cell_tf.cell);
                     continue;
                 };
 
@@ -115,15 +114,14 @@ pub fn update_cell_movement(
 
                 let start = transform.translation;
                 let neighbor_pos = neighbor_cell.position();
-                // Preserve the entity's Y so it stays at the correct floor height
                 let target = Vec3::new(neighbor_pos.x, start.y, neighbor_pos.z);
 
-                cell_mov.current_cell = neighbor_id;
+                cell_tf.cell = neighbor_id;
                 lerp_mov.start_position = start;
                 lerp_mov.target_position = target;
                 lerp_mov.lerp_progress = 0.0;
                 lerp_mov.state = MovementState::MovingToTarget;
-                debug!("Cell move: {:?} -> {:?} (dir={:?})", start, target, move_dir);
+                debug!("Cell move: {:?} -> {:?} (dir={:?})", start, target, target_dir);
             }
             MovementState::MovingToTarget => {
                 if lerp_mov.lerp_progress < 1.0 {
@@ -147,7 +145,7 @@ pub fn handle_player_input(
     config: Res<GameConfig>,
     controls: Res<Controls>,
     mut player_query: Query<(
-        &Transform,
+        &CellTransform,
         &mut LerpMovement,
         &mut LerpRotation,
         &mut InputRepeatTimer,
@@ -157,12 +155,11 @@ pub fn handle_player_input(
     let repeat_delay = config.player.input_repeat_delay;
     let delta_time = time.delta_secs();
 
-    for (transform, mut player_mov, mut player_rot, mut input_timer) in &mut player_query {
-        // Update timers
+    for (cell_tf, mut player_mov, mut player_rot, mut input_timer) in &mut player_query {
         input_timer.movement_timer += delta_time;
         input_timer.rotation_timer += delta_time;
 
-        // Only accept input when idle (not currently moving)
+        // Only accept input when idle
         if player_mov.state != MovementState::Idle {
             continue;
         }
@@ -172,11 +169,9 @@ pub fn handle_player_input(
         let mut movement_triggered = false;
         let mut rotation_triggered = false;
 
-        // Calculate movement direction relative to player's facing direction
-        let forward = transform.forward().as_vec3();
-        let right = transform.right().as_vec3();
+        let forward = cell_tf.facing.to_vec3(1.0);
+        let right   = cell_tf.facing.turn_left().to_vec3(1.0);
 
-        // Check movement inputs - just set direction, movement system handles distance
         if keyboard_input.pressed(controls.move_forward) {
             if keyboard_input.just_pressed(controls.move_forward)
                 || input_timer.movement_timer >= repeat_delay
@@ -210,12 +205,11 @@ pub fn handle_player_input(
             }
         }
 
-        // Check rotation inputs
         if keyboard_input.pressed(controls.rotate_left) {
             if keyboard_input.just_pressed(controls.rotate_left)
                 || input_timer.rotation_timer >= repeat_delay
             {
-                rotation_delta = std::f32::consts::FRAC_PI_2; // 90 degrees
+                rotation_delta = std::f32::consts::FRAC_PI_2;
                 rotation_triggered = true;
             }
         }
@@ -223,20 +217,18 @@ pub fn handle_player_input(
             if keyboard_input.just_pressed(controls.rotate_right)
                 || input_timer.rotation_timer >= repeat_delay
             {
-                rotation_delta = -std::f32::consts::FRAC_PI_2; // -90 degrees
+                rotation_delta = -std::f32::consts::FRAC_PI_2;
                 rotation_triggered = true;
             }
         }
 
-        // Set movement delta - the movement system will handle the rest
         if movement_delta != Vec3::ZERO {
             player_mov.movement_delta = movement_delta;
             if movement_triggered {
                 input_timer.movement_timer = 0.0;
             }
         }
-        
-        // Set rotation delta - the rotation system will handle the rest
+
         if rotation_delta != 0.0 {
             player_rot.rotation_delta = rotation_delta;
             if rotation_triggered {
@@ -249,30 +241,39 @@ pub fn handle_player_input(
 pub fn update_lerp_rotation(
     time: Res<Time>,
     config: Res<GameConfig>,
-    mut query: Query<(&mut Transform, &mut LerpRotation)>,
+    mut query: Query<(&mut Transform, &mut LerpRotation, Option<&mut CellTransform>)>,
 ) {
     let rotation_lerp_speed = config.player.rotation_lerp_speed;
     let delta_time = time.delta_secs();
 
-    for (mut transform, mut rot) in &mut query {
-        // Check if there's a rotation delta to process
+    for (mut transform, mut rot, cell_tf) in &mut query {
         if rot.rotation_delta != 0.0 && rot.lerp_progress >= 1.0 {
-            // Initiate rotation
             rot.target_rotation = transform.rotation * Quat::from_rotation_y(rot.rotation_delta);
             rot.lerp_progress = 0.0;
-            rot.rotation_delta = 0.0; // Consume the delta
+            rot.rotation_delta = 0.0;
         }
-        
-        if rot.lerp_progress < 1.0 {
-            // Increase lerp progress
-            rot.lerp_progress = (rot.lerp_progress + rotation_lerp_speed * delta_time).min(1.0);
 
-            // Slerp rotation towards target
+        if rot.lerp_progress < 1.0 {
+            rot.lerp_progress = (rot.lerp_progress + rotation_lerp_speed * delta_time).min(1.0);
             let start_rotation = transform.rotation;
             transform.rotation = start_rotation.slerp(rot.target_rotation, rot.lerp_progress);
         } else {
-            // Ensure we're at the exact target rotation
             transform.rotation = rot.target_rotation;
+        }
+
+        // Keep CellTransform.facing in sync once the rotation settles.
+        if rot.lerp_progress >= 1.0 {
+            if let Some(mut cell_tf) = cell_tf {
+                // Extract the world forward from the completed rotation.
+                // Bevy objects face -Z by default; rotate that into world space.
+                let world_fwd = transform.rotation * Vec3::NEG_Z;
+                let new_facing = if world_fwd.x.abs() >= world_fwd.z.abs() {
+                    if world_fwd.x >= 0.0 { Direction::East } else { Direction::West }
+                } else {
+                    if world_fwd.z >= 0.0 { Direction::North } else { Direction::South }
+                };
+                cell_tf.facing = new_facing;
+            }
         }
     }
 }

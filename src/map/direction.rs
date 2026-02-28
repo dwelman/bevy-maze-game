@@ -46,4 +46,26 @@ impl Direction {
             Direction::Down,
         ]
     }
+
+    /// Returns the cardinal direction 90° clockwise when viewed from above.
+    pub fn turn_right(self) -> Direction {
+        match self {
+            Direction::North => Direction::East,
+            Direction::East  => Direction::South,
+            Direction::South => Direction::West,
+            Direction::West  => Direction::North,
+            _                => self,
+        }
+    }
+
+    /// Returns the cardinal direction 90° counter-clockwise when viewed from above.
+    pub fn turn_left(self) -> Direction {
+        match self {
+            Direction::North => Direction::West,
+            Direction::West  => Direction::South,
+            Direction::South => Direction::East,
+            Direction::East  => Direction::North,
+            _                => self,
+        }
+    }
 }
