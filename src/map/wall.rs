@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use crate::map::{CellGraph, Direction};
-use crate::system::movement::Collider;
+use crate::GoalCellId;
 
-const WALL_THICKNESS: f32 = 0.1;
+const WALL_THICKNESS: f32 = 0.01;
 
 #[derive(Component)]
 pub struct CellWall {
@@ -14,14 +14,20 @@ pub struct CellWall {
 pub fn spawn_cell_walls(
     mut commands: Commands,
     graph: Res<CellGraph>,
+    goal_cell: Res<GoalCellId>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let cell_size = graph.cell_size();
 
-    // Material for walls
-    let wall_material = materials.add(StandardMaterial {
+    let default_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.5, 0.5, 0.5),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
+    let goal_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 1.0, 1.0),
         perceptual_roughness: 0.8,
         ..default()
     });
@@ -30,19 +36,23 @@ pub fn spawn_cell_walls(
         let cell_position = cell.position();
         let cell_id = cell.id();
 
+        let material = if goal_cell.0 == Some(cell_id) {
+            goal_material.clone()
+        } else {
+            default_material.clone()
+        };
+
         // Spawn a wall for each boundary face
         for direction in cell.boundary_faces() {
             let (wall_size, wall_offset) = calculate_wall_geometry(direction, cell_size);
             let wall_position = cell_position + wall_offset;
 
-            // Create mesh for this wall
             let mesh = meshes.add(Cuboid::new(wall_size.x, wall_size.y, wall_size.z));
 
             commands.spawn((
                 Mesh3d(mesh),
-                MeshMaterial3d(wall_material.clone()),
+                MeshMaterial3d(material.clone()),
                 Transform::from_translation(wall_position),
-                Collider { size: wall_size },
                 CellWall {
                     cell_id,
                     direction,
@@ -58,39 +68,33 @@ fn calculate_wall_geometry(direction: Direction, cell_size: f32) -> (Vec3, Vec3)
 
     match direction {
         Direction::North => {
-            // Wall on +Z face - extend outward from cell boundary
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
-            let offset = Vec3::new(0.0, 0.0, half_cell + WALL_THICKNESS / 2.0);
+            let offset = Vec3::new(0.0, 0.0, half_cell - WALL_THICKNESS / 2.0);
             (size, offset)
         }
         Direction::South => {
-            // Wall on -Z face - extend outward from cell boundary
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
-            let offset = Vec3::new(0.0, 0.0, -half_cell - WALL_THICKNESS / 2.0);
+            let offset = Vec3::new(0.0, 0.0, -half_cell + WALL_THICKNESS / 2.0);
             (size, offset)
         }
         Direction::East => {
-            // Wall on +X face - extend outward from cell boundary
             let size = Vec3::new(WALL_THICKNESS, cell_size, cell_size);
-            let offset = Vec3::new(half_cell + WALL_THICKNESS / 2.0, 0.0, 0.0);
+            let offset = Vec3::new(half_cell - WALL_THICKNESS / 2.0, 0.0, 0.0);
             (size, offset)
         }
         Direction::West => {
-            // Wall on -X face - extend outward from cell boundary
             let size = Vec3::new(WALL_THICKNESS, cell_size, cell_size);
-            let offset = Vec3::new(-half_cell - WALL_THICKNESS / 2.0, 0.0, 0.0);
+            let offset = Vec3::new(-half_cell + WALL_THICKNESS / 2.0, 0.0, 0.0);
             (size, offset)
         }
         Direction::Up => {
-            // Wall on +Y face (ceiling) - extend upward from ceiling level
             let size = Vec3::new(cell_size, WALL_THICKNESS, cell_size);
-            let offset = Vec3::new(0.0, half_cell + WALL_THICKNESS / 2.0, 0.0);
+            let offset = Vec3::new(0.0, half_cell - WALL_THICKNESS / 2.0, 0.0);
             (size, offset)
         }
         Direction::Down => {
-            // Wall on -Y face (floor) - extend downward from floor level
             let size = Vec3::new(cell_size, WALL_THICKNESS, cell_size);
-            let offset = Vec3::new(0.0, -half_cell - WALL_THICKNESS / 2.0, 0.0);
+            let offset = Vec3::new(0.0, -half_cell + WALL_THICKNESS / 2.0, 0.0);
             (size, offset)
         }
     }

@@ -3,11 +3,6 @@ use bevy::prelude::*;
 use crate::{Controls, GameConfig};
 use crate::map::{CellGraph, CellId, Direction};
 
-#[derive(Component)]
-pub struct Collider {
-    pub size: Vec3,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementState {
     Idle,
@@ -159,8 +154,8 @@ pub fn handle_player_input(
         input_timer.movement_timer += delta_time;
         input_timer.rotation_timer += delta_time;
 
-        // Only accept input when idle
-        if player_mov.state != MovementState::Idle {
+        // Only accept input when idle and not rotating
+        if player_mov.state != MovementState::Idle || player_rot.lerp_progress < 1.0 {
             continue;
         }
 
