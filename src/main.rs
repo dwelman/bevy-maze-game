@@ -228,21 +228,23 @@ fn setup(
     let floor_height = graph.get_cell_floor_height(starting_cell.id()).unwrap();
 
     // Player entity (parent) - handles movement, rotation, and collision
+    let initial_facing = Direction::North;
+    let initial_rotation = initial_facing.to_quat();
     let player = commands.spawn((
         Player,
-        Transform::from_xyz(0.0, player_y, 0.0)
-            .looking_at(Vec3::new(1.0, player_y, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, player_y, 0.0).with_rotation(initial_rotation),
         LerpMovement {
             state: MovementState::Idle,
             movement_delta: Vec3::ZERO,
             target_position: Vec3::new(0.0, player_y, 0.0),
             start_position: Vec3::new(0.0, player_y, 0.0),
             lerp_progress: 0.0,
+            pending_cell: None,
         },
         LerpRotation {
             rotation_delta: 0.0,
-            target_rotation: Quat::from_rotation_y(-90.0_f32.to_radians()),
-            lerp_progress: 0.0,
+            target_rotation: initial_rotation,
+            lerp_progress: 1.0,
         },
         InputRepeatTimer {
             movement_timer: 0.0,
@@ -250,7 +252,7 @@ fn setup(
         },
         CellTransform {
             cell: starting_cell.id(),
-            facing: Direction::East,
+            facing: initial_facing,
         },
     )).id();
 
@@ -312,18 +314,18 @@ fn setup_corridor(
 ) {
     let cell_size = graph.cell_size();
 
-    // Create 5 cells: 3 in a straight line (East), then 2 branching (North and South)
+    // Create 5 cells: 3 in a straight line (North), then 2 branching (East and West)
     let cell_0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-    let cell_1 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0));
-    let cell_2 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, 0.0));
-    let cell_3 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, cell_size));  // North from cell_2
-    let cell_4 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, -cell_size)); // South from cell_2
+    let cell_1 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size));
+    let cell_2 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 2.0));
+    let cell_3 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size * 2.0));  // East from cell_2 (+X)
+    let cell_4 = graph.add_cell(Vec3::new(-cell_size, 0.0, -cell_size * 2.0)); // West from cell_2 (-X)
 
     // Connect the corridor: 0 -> 1 -> 2, then 2 -> 3 and 2 -> 4
-    graph.connect_cells(cell_0, Direction::East, cell_1);
-    graph.connect_cells(cell_1, Direction::East, cell_2);
-    graph.connect_cells(cell_2, Direction::North, cell_3);
-    graph.connect_cells(cell_2, Direction::South, cell_4);
+    graph.connect_cells(cell_0, Direction::North, cell_1);
+    graph.connect_cells(cell_1, Direction::North, cell_2);
+    graph.connect_cells(cell_2, Direction::East, cell_3);
+    graph.connect_cells(cell_2, Direction::West, cell_4);
 
     // Spawn a weak point light in each cell
     for cell in graph.cells() {
@@ -441,7 +443,7 @@ fn setup_goal_cell(
     let mut rng = rand::rng();
     let (parent_id, parent_pos, direction) = *candidates.choose(&mut rng).unwrap();
 
-    let new_pos = parent_pos + direction.to_vec3(cell_size);
+    let new_pos = parent_pos + direction.to_vec3() * cell_size;
     let goal_id = graph.add_cell(new_pos);
     graph.connect_cells(parent_id, direction, goal_id);
 

@@ -21,6 +21,8 @@ pub struct LerpMovement {
     pub start_position: Vec3,
     /// Current lerp progress from 0.0 to 1.0
     pub lerp_progress: f32,
+    /// Cell ID the entity is moving towards; committed to CellTransform on arrival.
+    pub pending_cell: Option<CellId>,
 }
 
 #[derive(Component)]
@@ -83,15 +85,15 @@ pub fn update_cell_movement(
 
                 // Resolve the world-space delta into a cardinal direction using
                 // the stored facing — no quaternion math required.
-                let fwd_vec = cell_tf.facing.to_vec3(1.0);
-                let rgt_vec = cell_tf.facing.turn_left().to_vec3(1.0);
+                let fwd_vec = cell_tf.facing.to_vec3();
+                let rgt_vec = cell_tf.facing.turn_right().to_vec3();
                 let fwd_dot = delta.dot(fwd_vec);
                 let rgt_dot = delta.dot(rgt_vec);
 
                 let target_dir = if fwd_dot.abs() >= rgt_dot.abs() {
                     if fwd_dot >= 0.0 { cell_tf.facing } else { cell_tf.facing.opposite() }
                 } else {
-                    if rgt_dot >= 0.0 { cell_tf.facing.turn_left() } else { cell_tf.facing.turn_right() }
+                    if rgt_dot >= 0.0 { cell_tf.facing.turn_right() } else { cell_tf.facing.turn_left() }
                 };
 
                 let Some(current_cell) = cell_graph.get_cell(cell_tf.cell) else {
@@ -111,7 +113,7 @@ pub fn update_cell_movement(
                 let neighbor_pos = neighbor_cell.position();
                 let target = Vec3::new(neighbor_pos.x, start.y, neighbor_pos.z);
 
-                cell_tf.cell = neighbor_id;
+                lerp_mov.pending_cell = Some(neighbor_id);
                 lerp_mov.start_position = start;
                 lerp_mov.target_position = target;
                 lerp_mov.lerp_progress = 0.0;
@@ -128,6 +130,9 @@ pub fn update_cell_movement(
                 }
                 if lerp_mov.lerp_progress >= 1.0 {
                     transform.translation = lerp_mov.target_position;
+                    if let Some(arrived_cell) = lerp_mov.pending_cell.take() {
+                        cell_tf.cell = arrived_cell;
+                    }
                     lerp_mov.state = MovementState::Idle;
                 }
             }
@@ -164,8 +169,8 @@ pub fn handle_player_input(
         let mut movement_triggered = false;
         let mut rotation_triggered = false;
 
-        let forward = cell_tf.facing.to_vec3(1.0);
-        let right   = cell_tf.facing.turn_left().to_vec3(1.0);
+        let forward = cell_tf.facing.to_vec3();
+        let right   = cell_tf.facing.turn_right().to_vec3();
 
         if keyboard_input.pressed(controls.move_forward) {
             if keyboard_input.just_pressed(controls.move_forward)
@@ -265,7 +270,7 @@ pub fn update_lerp_rotation(
                 let new_facing = if world_fwd.x.abs() >= world_fwd.z.abs() {
                     if world_fwd.x >= 0.0 { Direction::East } else { Direction::West }
                 } else {
-                    if world_fwd.z >= 0.0 { Direction::North } else { Direction::South }
+                    if world_fwd.z >= 0.0 { Direction::South } else { Direction::North }
                 };
                 cell_tf.facing = new_facing;
             }

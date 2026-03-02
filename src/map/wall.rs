@@ -69,12 +69,12 @@ fn calculate_wall_geometry(direction: Direction, cell_size: f32) -> (Vec3, Vec3)
     match direction {
         Direction::North => {
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
-            let offset = Vec3::new(0.0, 0.0, half_cell - WALL_THICKNESS / 2.0);
+            let offset = Vec3::new(0.0, 0.0, -half_cell + WALL_THICKNESS / 2.0);
             (size, offset)
         }
         Direction::South => {
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
-            let offset = Vec3::new(0.0, 0.0, -half_cell + WALL_THICKNESS / 2.0);
+            let offset = Vec3::new(0.0, 0.0, half_cell - WALL_THICKNESS / 2.0);
             (size, offset)
         }
         Direction::East => {

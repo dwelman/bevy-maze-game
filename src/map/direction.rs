@@ -1,9 +1,9 @@
-use bevy::math::Vec3;
+use bevy::math::{Quat, Vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
-    North, // +Z
-    South, // -Z
+    North, // -Z (Bevy forward)
+    South, // +Z (Bevy backward)
     East,  // +X
     West,  // -X
     Up,    // +Y
@@ -23,15 +23,27 @@ impl Direction {
         }
     }
 
-    /// Converts direction to a unit vector scaled by grid_unit
-    pub fn to_vec3(self, grid_unit: f32) -> Vec3 {
+    /// Converts direction to a unit vector
+    pub fn to_vec3(self) -> Vec3 {
         match self {
-            Direction::North => Vec3::new(0.0, 0.0, grid_unit),
-            Direction::South => Vec3::new(0.0, 0.0, -grid_unit),
-            Direction::East => Vec3::new(grid_unit, 0.0, 0.0),
-            Direction::West => Vec3::new(-grid_unit, 0.0, 0.0),
-            Direction::Up => Vec3::new(0.0, grid_unit, 0.0),
-            Direction::Down => Vec3::new(0.0, -grid_unit, 0.0),
+            Direction::North => Vec3::new(0.0, 0.0, -1.0),
+            Direction::South => Vec3::new(0.0, 0.0, 1.0),
+            Direction::East => Vec3::new(1.0, 0.0, 0.0),
+            Direction::West => Vec3::new(-1.0, 0.0, 0.0),
+            Direction::Up => Vec3::new(0.0, 1.0, 0.0),
+            Direction::Down => Vec3::new(0.0, -1.0, 0.0),
+        }
+    }
+
+    /// Returns the Y-axis rotation quaternion for an entity facing this direction.
+    /// Assumes Bevy's default entity forward of -Z.
+    pub fn to_quat(self) -> Quat {
+        match self {
+            Direction::North => Quat::IDENTITY,
+            Direction::South => Quat::from_rotation_y(std::f32::consts::PI),
+            Direction::East  => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+            Direction::West  => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            Direction::Up | Direction::Down => Quat::IDENTITY,
         }
     }
 
