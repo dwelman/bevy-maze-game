@@ -84,16 +84,14 @@ pub fn spawn_cell_walls(
             ));
         }
 
-        // Spawn doorway frames at cross-room connections
+        // Spawn doorway frames at cross-room connections.
+        // Each cell spawns its own side of the doorway using its own room's colour,
+        // so the frame matches the room you're standing in from both directions.
         let cell_room = room_map.get_cell_room(cell_id);
         for direction in Direction::all() {
             if let Some(neighbor_id) = cell.get_neighbor(direction) {
-                // Only spawn once per connection (from the lower-ID cell)
-                if cell_id.0 >= neighbor_id.0 { continue; }
-
                 let neighbor_room = room_map.get_cell_room(neighbor_id);
 
-                // Only at boundaries between two different rooms
                 if let (Some(room_a), Some(room_b)) = (cell_room, neighbor_room) {
                     if room_a != room_b {
                         let doorway_material = room_materials.get(&room_a)

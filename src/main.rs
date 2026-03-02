@@ -465,6 +465,7 @@ fn setup_goal_cell(
     mut commands: Commands,
     mut graph: ResMut<CellGraph>,
     mut goal_cell_id: ResMut<GoalCellId>,
+    mut room_map: ResMut<RoomMap>,
 ) {
     use rand::prelude::*;
 
@@ -495,6 +496,13 @@ fn setup_goal_cell(
     graph.connect_cells(parent_id, direction, goal_id);
 
     goal_cell_id.0 = Some(goal_id);
+
+    // Create an exit room for the goal cell and connect it to the parent's room
+    let exit_room_id = room_map.create_room(Color::srgb(1.0, 1.0, 1.0));
+    room_map.assign_cell(goal_id, exit_room_id);
+    if let Some(parent_room_id) = room_map.get_cell_room(parent_id) {
+        room_map.connect_rooms(parent_room_id, parent_id, direction, exit_room_id, goal_id);
+    }
 
     commands.spawn((
         PointLight {
