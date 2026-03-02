@@ -14,7 +14,7 @@ use system::movement::{
     handle_player_input, update_lerp_rotation, update_cell_movement,
     CellTransform, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
-use map::{CellGraph, CellId, Direction, spawn_cell_walls};
+use map::{CellGraph, CellId, Direction, RoomMap, spawn_cell_walls};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -181,10 +181,11 @@ fn main() {
         .insert_resource(controls)
         .insert_resource(CameraLookMode(config.camera.look_mode.clone()))
         .insert_resource(CellGraph::new(config.world.cell_size))
+        .insert_resource(RoomMap::new())
         .insert_resource(DebugVisible(false))
         .insert_resource(WinState(false))
         .init_resource::<GoalCellId>()
-        .add_systems(Startup, (setup_corridor, setup_goal_cell, setup, spawn_cell_walls).chain())
+        .add_systems(Startup, (setup_rooms, setup_goal_cell, setup, spawn_cell_walls).chain())
         .add_systems(Update, (handle_player_input, update_cell_movement, update_lerp_rotation))
         .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
         .add_systems(Update, (toggle_debug_text, update_debug_text))
@@ -308,38 +309,84 @@ fn setup(
     ));
 }
 
-fn setup_corridor(
+fn setup_rooms(
     mut commands: Commands,
     mut graph: ResMut<CellGraph>,
+    mut room_map: ResMut<RoomMap>,
 ) {
+    let mut rng = rand::rng();
     let cell_size = graph.cell_size();
 
-    // Create 5 cells: 3 in a straight line (North), then 2 branching (East and West)
-    let cell_0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-    let cell_1 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size));
-    let cell_2 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 2.0));
-    let cell_3 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size * 2.0));  // East from cell_2 (+X)
-    let cell_4 = graph.add_cell(Vec3::new(-cell_size, 0.0, -cell_size * 2.0)); // West from cell_2 (-X)
+    // Create rooms with random colors
+    let room_0_id = room_map.create_room(random_room_color(&mut rng));
+    let room_1_id = room_map.create_room(random_room_color(&mut rng));
+    let room_2_id = room_map.create_room(random_room_color(&mut rng));
 
-    // Connect the corridor: 0 -> 1 -> 2, then 2 -> 3 and 2 -> 4
-    graph.connect_cells(cell_0, Direction::North, cell_1);
-    graph.connect_cells(cell_1, Direction::North, cell_2);
-    graph.connect_cells(cell_2, Direction::East, cell_3);
-    graph.connect_cells(cell_2, Direction::West, cell_4);
+    // Room 0: 2x2 square (player starts here at 0,0,0)
+    let r0c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
+    let r0c1 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0));
+    let r0c2 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size));
+    let r0c3 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size));
 
-    // Spawn a weak point light in each cell
+    graph.connect_cells(r0c0, Direction::East, r0c1);
+    graph.connect_cells(r0c0, Direction::North, r0c2);
+    graph.connect_cells(r0c1, Direction::North, r0c3);
+    graph.connect_cells(r0c2, Direction::East, r0c3);
+
+    room_map.assign_cell(r0c0, room_0_id);
+    room_map.assign_cell(r0c1, room_0_id);
+    room_map.assign_cell(r0c2, room_0_id);
+    room_map.assign_cell(r0c3, room_0_id);
+
+    // Room 1: L-shaped corridor going north then east
+    let r1c0 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 2.0));
+    let r1c1 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 3.0));
+    let r1c2 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size * 3.0));
+
+    graph.connect_cells(r1c0, Direction::North, r1c1);
+    graph.connect_cells(r1c1, Direction::East, r1c2);
+
+    room_map.assign_cell(r1c0, room_1_id);
+    room_map.assign_cell(r1c1, room_1_id);
+    room_map.assign_cell(r1c2, room_1_id);
+
+    // Room 2: 2-cell corridor going north, east of room 0
+    let r2c0 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, 0.0));
+    let r2c1 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, -cell_size));
+
+    graph.connect_cells(r2c0, Direction::North, r2c1);
+
+    room_map.assign_cell(r2c0, room_2_id);
+    room_map.assign_cell(r2c1, room_2_id);
+
+    // Connect rooms via edge cells (both in the graph and in the room map)
+    // Room 0 north edge -> Room 1 south edge
+    graph.connect_cells(r0c2, Direction::North, r1c0);
+    room_map.connect_rooms(room_0_id, r0c2, Direction::North, room_1_id, r1c0);
+
+    // Room 0 east edge -> Room 2 west edge
+    graph.connect_cells(r0c1, Direction::East, r2c0);
+    room_map.connect_rooms(room_0_id, r0c1, Direction::East, room_2_id, r2c0);
+
+    // Spawn a point light in each cell
     for cell in graph.cells() {
         let position = cell.position();
         commands.spawn((
             PointLight {
                 shadows_enabled: true,
-                intensity: 500_000.0,  // Weaker than before
+                intensity: 500_000.0,
                 range: 10.0,
                 ..default()
             },
             Transform::from_xyz(position.x, (position.y + (cell_size / 2.0)) - 0.2, position.z),
         ));
     }
+}
+
+fn random_room_color(rng: &mut impl rand::Rng) -> Color {
+    use rand::RngExt;
+    let hue: f32 = rng.random_range(0.0f32..360.0f32);
+    Color::hsl(hue, 0.7, 0.4)
 }
 
 fn toggle_debug_text(

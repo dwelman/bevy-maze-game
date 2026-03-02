@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use crate::map::{CellGraph, Direction};
+use std::collections::HashMap;
+use crate::map::{CellGraph, Direction, RoomId, RoomMap};
 use crate::GoalCellId;
 
 const WALL_THICKNESS: f32 = 0.01;
@@ -14,11 +15,24 @@ pub struct CellWall {
 pub fn spawn_cell_walls(
     mut commands: Commands,
     graph: Res<CellGraph>,
+    room_map: Res<RoomMap>,
     goal_cell: Res<GoalCellId>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let cell_size = graph.cell_size();
+
+    // Pre-create a material for each room
+    let room_materials: HashMap<RoomId, Handle<StandardMaterial>> = room_map.rooms()
+        .map(|room| {
+            let material = materials.add(StandardMaterial {
+                base_color: room.color(),
+                perceptual_roughness: 0.8,
+                ..default()
+            });
+            (room.id(), material)
+        })
+        .collect();
 
     let default_material = materials.add(StandardMaterial {
         base_color: Color::srgb(0.5, 0.5, 0.5),
@@ -38,6 +52,8 @@ pub fn spawn_cell_walls(
 
         let material = if goal_cell.0 == Some(cell_id) {
             goal_material.clone()
+        } else if let Some(room_id) = room_map.get_cell_room(cell_id) {
+            room_materials.get(&room_id).cloned().unwrap_or(default_material.clone())
         } else {
             default_material.clone()
         };
