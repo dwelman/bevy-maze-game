@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::ui::{JustifyContent, Node, PositionType, Val};
+use bevy::ui::{Node, PositionType, Val};
 use bevy::log::LogPlugin;
 use serde::Deserialize;
 use std::fs;
@@ -11,10 +11,10 @@ use system::camera::{
     handle_camera_look, toggle_camera_look_mode, update_camera_look_lerp, CameraLook,
 };
 use system::movement::{
-    handle_player_input, update_lerp_movement, update_lerp_rotation,
-    Collider, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
+    handle_player_input, update_lerp_rotation, update_cell_movement,
+    CellTransform, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
-use map::{CellGraph, spawn_cell_walls};
+use map::{CellGraph, CellId, Direction, spawn_cell_walls};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -28,14 +28,9 @@ struct CameraLookMode(LookMode);
 
 #[derive(Deserialize, Clone)]
 pub struct PlayerConfig {
-    pub grid_unit: f32,
     pub lerp_speed: f32,
     pub rotation_lerp_speed: f32,
     pub input_repeat_delay: f32,
-    /// Total height of the player creature in world units.
-    pub creature_height: f32,
-    /// Width (and depth) of the player creature's collider in world units.
-    pub creature_width: f32,
     /// Height above the creature's feet where the camera (eyes) sits.
     pub eye_height: f32,
 }
@@ -68,14 +63,23 @@ pub struct DebugConfig {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct WorldConfig {
+    pub cell_size: f32,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct GameConfig {
     pub player: PlayerConfig,
     pub camera: CameraConfig,
     pub controls: ControlsConfig,
     pub debug: DebugConfig,
+    pub world: WorldConfig,
 }
 
 impl Resource for GameConfig {}
+
+#[derive(Resource, Default)]
+pub struct GoalCellId(pub Option<CellId>);
 
 #[derive(Resource, Clone)]
 struct Controls {
@@ -176,17 +180,15 @@ fn main() {
         .insert_resource(config.clone())
         .insert_resource(controls)
         .insert_resource(CameraLookMode(config.camera.look_mode.clone()))
-        .insert_resource(CellGraph::new(5.0))
-        .insert_resource(DoorMessage {
-            text: "Find the door and click on it to win!".to_string(),
-            timer: 0.0,
-        })
+        .insert_resource(CellGraph::new(config.world.cell_size))
         .insert_resource(DebugVisible(false))
-        .add_systems(Startup, (setup_corridor, setup, spawn_cell_walls, spawn_door).chain())
-        .add_systems(Update, (handle_player_input, update_lerp_movement, update_lerp_rotation))
+        .insert_resource(WinState(false))
+        .init_resource::<GoalCellId>()
+        .add_systems(Startup, (setup_corridor, setup_goal_cell, setup, spawn_cell_walls).chain())
+        .add_systems(Update, (handle_player_input, update_cell_movement, update_lerp_rotation))
         .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
-        .add_systems(Update, (check_door_click, update_door_message, update_door_message_ui))
         .add_systems(Update, (toggle_debug_text, update_debug_text))
+        .add_systems(Update, check_win_condition)
         .run();
 }
 
@@ -194,24 +196,16 @@ fn main() {
 struct DebugText;
 
 #[derive(Component)]
-struct DoorMessageText;
+struct WinText;
 
 #[derive(Component)]
 struct Player;
 
-#[derive(Component)]
-struct Door {
-    found: bool,
-}
-
-#[derive(Resource)]
-struct DoorMessage {
-    text: String,
-    timer: f32,
-}
-
 #[derive(Resource)]
 struct DebugVisible(bool);
+
+#[derive(Resource)]
+struct WinState(bool);
 
 fn setup(
     mut commands: Commands,
@@ -220,11 +214,9 @@ fn setup(
     config: Res<GameConfig>,
     graph: Res<CellGraph>,
 ) {
-    let creature_width = config.player.creature_width;
-    let creature_height = config.player.creature_height;
     let eye_height = config.player.eye_height;
 
-    // Find the starting cell (cell at position 0,0,0) and get its floor height
+    // Find the starting cell (cell at position 0,0,0)
     let starting_cell = graph.cells()
         .find(|cell| {
             let pos = cell.position();
@@ -232,38 +224,40 @@ fn setup(
         })
         .expect("Starting cell not found");
 
+    let player_y = starting_cell.position().y;
     let floor_height = graph.get_cell_floor_height(starting_cell.id()).unwrap();
-    let player_y = floor_height + creature_height / 2.0;
 
     // Player entity (parent) - handles movement, rotation, and collision
+    let initial_facing = Direction::North;
+    let initial_rotation = initial_facing.to_quat();
     let player = commands.spawn((
         Player,
-        Transform::from_xyz(0.0, player_y, 0.0)
-            .looking_at(Vec3::new(1.0, player_y, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, player_y, 0.0).with_rotation(initial_rotation),
         LerpMovement {
             state: MovementState::Idle,
             movement_delta: Vec3::ZERO,
             target_position: Vec3::new(0.0, player_y, 0.0),
             start_position: Vec3::new(0.0, player_y, 0.0),
             lerp_progress: 0.0,
+            pending_cell: None,
         },
         LerpRotation {
             rotation_delta: 0.0,
-            target_rotation: Quat::from_rotation_y(-90.0_f32.to_radians()),
-            lerp_progress: 0.0,
+            target_rotation: initial_rotation,
+            lerp_progress: 1.0,
         },
         InputRepeatTimer {
             movement_timer: 0.0,
             rotation_timer: 0.0,
         },
-        Collider {
-            size: Vec3::new(creature_width, creature_height, creature_width),
+        CellTransform {
+            cell: starting_cell.id(),
+            facing: initial_facing,
         },
     )).id();
 
-    // Camera entity (child) - positioned at eye height, inherits parent rotation
-    // eye_height is from feet, player transform is at center, so adjust accordingly
-    let camera_y_relative = eye_height - creature_height / 2.0;
+    // Camera entity (child) - sits at eye_height above the cell floor, relative to player
+    let camera_y_relative = (floor_height + eye_height) - player_y;
     commands.spawn((
         Camera3d::default(),
         CameraLook {
@@ -273,7 +267,8 @@ fn setup(
             target_pitch: 0.0,
         },
         Transform::from_xyz(0.0, camera_y_relative, 0.0),
-    )).set_parent_in_place(player);
+        ChildOf(player),
+    ));
 
     // Debug text UI
     commands.spawn((
@@ -293,22 +288,23 @@ fn setup(
         Visibility::Hidden,
     ));
 
-    // Door message/instructions UI - top center
+    // Win message UI - centered
     commands.spawn((
-        Text::new("Find the door and click on it to win!"),
-        TextColor(Color::srgb(1.0, 1.0, 1.0)),
+        Text::new("You found the exit!"),
+        TextColor(Color::srgb(1.0, 0.85, 0.0)),
         TextFont {
-            font_size: 20.0,
+            font_size: 32.0,
             ..default()
         },
+        TextLayout::new_with_justify(Justify::Center),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(10.0),
+            top: Val::Percent(40.0),
             width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
             ..default()
         },
-        DoorMessageText,
+        WinText,
+        Visibility::Hidden,
     ));
 }
 
@@ -316,22 +312,20 @@ fn setup_corridor(
     mut commands: Commands,
     mut graph: ResMut<CellGraph>,
 ) {
-    use map::Direction;
-
     let cell_size = graph.cell_size();
 
-    // Create 5 cells: 3 in a straight line (East), then 2 branching (North and South)
+    // Create 5 cells: 3 in a straight line (North), then 2 branching (East and West)
     let cell_0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-    let cell_1 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0));
-    let cell_2 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, 0.0));
-    let cell_3 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, cell_size));  // North from cell_2
-    let cell_4 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, -cell_size)); // South from cell_2
+    let cell_1 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size));
+    let cell_2 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 2.0));
+    let cell_3 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size * 2.0));  // East from cell_2 (+X)
+    let cell_4 = graph.add_cell(Vec3::new(-cell_size, 0.0, -cell_size * 2.0)); // West from cell_2 (-X)
 
     // Connect the corridor: 0 -> 1 -> 2, then 2 -> 3 and 2 -> 4
-    graph.connect_cells(cell_0, Direction::East, cell_1);
-    graph.connect_cells(cell_1, Direction::East, cell_2);
-    graph.connect_cells(cell_2, Direction::North, cell_3);
-    graph.connect_cells(cell_2, Direction::South, cell_4);
+    graph.connect_cells(cell_0, Direction::North, cell_1);
+    graph.connect_cells(cell_1, Direction::North, cell_2);
+    graph.connect_cells(cell_2, Direction::East, cell_3);
+    graph.connect_cells(cell_2, Direction::West, cell_4);
 
     // Spawn a weak point light in each cell
     for cell in graph.cells() {
@@ -343,7 +337,7 @@ fn setup_corridor(
                 range: 10.0,
                 ..default()
             },
-            Transform::from_xyz(position.x, position.y + 2.0, position.z), // 2 units above cell center
+            Transform::from_xyz(position.x, (position.y + (cell_size / 2.0)) - 0.2, position.z),
         ));
     }
 }
@@ -367,19 +361,18 @@ fn toggle_debug_text(
 }
 
 fn update_debug_text(
-    player_query: Query<&Transform, With<Player>>,
+    player_query: Query<(&Transform, &CellTransform), With<Player>>,
     camera_query: Query<&CameraLook, With<Camera3d>>,
     look_mode: Res<CameraLookMode>,
     config: Res<GameConfig>,
     debug_visible: Res<DebugVisible>,
     mut debug_text_query: Query<&mut Text, With<DebugText>>,
 ) {
-    // Skip update if debug is not visible
     if !debug_visible.0 {
         return;
     }
 
-    let Ok(player_transform) = player_query.single() else {
+    let Ok((player_transform, cell_tf)) = player_query.single() else {
         return;
     };
 
@@ -393,7 +386,6 @@ fn update_debug_text(
     };
 
     let pos = player_transform.translation;
-    let forward = player_transform.forward();
 
     let look_mode_str = match look_mode.0 {
         LookMode::Relative => "Relative",
@@ -408,13 +400,13 @@ fn update_debug_text(
          \n\
          PLAYER:\n\
          Pos: ({:.2}, {:.2}, {:.2})\n\
-         Facing: ({:.2}, {:.2}, {:.2})\n\
+         Cell: {:?} | Facing: {:?}\n\
          Yaw: {:.2} degrees | Pitch: {:.2} degrees",
         config.controls.look_hold,
         config.controls.look_mode_toggle,
         look_mode_str,
         pos.x, pos.y, pos.z,
-        forward.x, forward.y, forward.z,
+        cell_tf.cell, cell_tf.facing,
         (camera_look.yaw).to_degrees(),
         (camera_look.pitch).to_degrees(),
     );
@@ -422,238 +414,69 @@ fn update_debug_text(
     debug_text.0 = text;
 }
 
-fn spawn_door(
+fn setup_goal_cell(
     mut commands: Commands,
-    graph: Res<CellGraph>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut graph: ResMut<CellGraph>,
+    mut goal_cell_id: ResMut<GoalCellId>,
 ) {
-    use map::Direction;
     use rand::prelude::*;
 
-    const WALL_THICKNESS: f32 = 0.1; // Match wall thickness from wall.rs
-    const DOOR_THICKNESS: f32 = 0.2;
-    const DOOR_WIDTH: f32 = 0.8;
-    const DOOR_HEIGHT: f32 = 1.8;
-
     let cell_size = graph.cell_size();
-    let mut rng = rand::rng();
-
-    // Collect all boundary walls (excluding Up and Down)
     let horizontal_directions = [Direction::North, Direction::South, Direction::East, Direction::West];
-    let mut boundary_walls = Vec::new();
 
-    for cell in graph.cells() {
-        let cell_position = cell.position();
-        let cell_id = cell.id();
+    let candidates: Vec<(CellId, Vec3, Direction)> = graph.cells()
+        .flat_map(|cell| {
+            let id = cell.id();
+            let pos = cell.position();
+            cell.boundary_faces()
+                .into_iter()
+                .filter(|d| horizontal_directions.contains(d))
+                .map(move |d| (id, pos, d))
+                .collect::<Vec<_>>()
+        })
+        .collect();
 
-        for direction in cell.boundary_faces() {
-            // Only consider horizontal walls (not ceiling/floor)
-            if horizontal_directions.contains(&direction) {
-                boundary_walls.push((cell_id, cell_position, direction));
-            }
-        }
-    }
-
-    if boundary_walls.is_empty() {
+    if candidates.is_empty() {
         return;
     }
 
-    // Pick a random wall
-    let (cell_id, cell_position, direction) = boundary_walls.choose(&mut rng).unwrap();
+    let mut rng = rand::rng();
+    let (parent_id, parent_pos, direction) = *candidates.choose(&mut rng).unwrap();
 
-    // Get the floor height from the cell graph
-    let floor_height = graph.get_cell_floor_height(*cell_id).unwrap();
-    let door_center_height = floor_height + DOOR_HEIGHT / 2.0;
+    let new_pos = parent_pos + direction.to_vec3() * cell_size;
+    let goal_id = graph.add_cell(new_pos);
+    graph.connect_cells(parent_id, direction, goal_id);
 
-    // Calculate door size and base position based on direction
-    // Position door flush with wall but extending inward into the cell
-    let half_cell = cell_size / 2.0;
-    let (door_size, wall_offset, lateral_axis) = match direction {
-        Direction::North => {
-            let size = Vec3::new(DOOR_WIDTH, DOOR_HEIGHT, DOOR_THICKNESS);
-            let offset = Vec3::new(0.0, door_center_height, half_cell - DOOR_THICKNESS / 2.0);
-            (size, offset, 'x')
-        }
-        Direction::South => {
-            let size = Vec3::new(DOOR_WIDTH, DOOR_HEIGHT, DOOR_THICKNESS);
-            let offset = Vec3::new(0.0, door_center_height, -half_cell + DOOR_THICKNESS / 2.0);
-            (size, offset, 'x')
-        }
-        Direction::East => {
-            let size = Vec3::new(DOOR_THICKNESS, DOOR_HEIGHT, DOOR_WIDTH);
-            let offset = Vec3::new(half_cell - DOOR_THICKNESS / 2.0, door_center_height, 0.0);
-            (size, offset, 'z')
-        }
-        Direction::West => {
-            let size = Vec3::new(DOOR_THICKNESS, DOOR_HEIGHT, DOOR_WIDTH);
-            let offset = Vec3::new(-half_cell + DOOR_THICKNESS / 2.0, door_center_height, 0.0);
-            (size, offset, 'z')
-        }
-        _ => return, // Skip Up/Down
-    };
-
-    // Calculate random lateral offset (aligned to grid)
-    // For a 5-unit wall with 0.8-unit door, we can place it at different positions
-    let max_offset = ((cell_size - DOOR_WIDTH) / 2.0).floor() as i32;
-    let lateral_offset = rng.random_range(-max_offset..=max_offset) as f32;
-
-    let lateral_vec = match lateral_axis {
-        'x' => Vec3::new(lateral_offset, 0.0, 0.0),
-        'z' => Vec3::new(0.0, 0.0, lateral_offset),
-        _ => Vec3::ZERO,
-    };
-
-    let door_position = *cell_position + wall_offset + lateral_vec;
-
-    // Create door material (different color from walls)
-    let door_material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.6, 0.4, 0.2), // Brown color for the door
-        perceptual_roughness: 0.8,
-        ..default()
-    });
-
-    // Spawn the door
-    let mesh = meshes.add(Cuboid::new(door_size.x, door_size.y, door_size.z));
+    goal_cell_id.0 = Some(goal_id);
 
     commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(door_material),
-        Transform::from_translation(door_position),
-        Collider { size: door_size },
-        Door { found: false },
+        PointLight {
+            shadows_enabled: true,
+            intensity: 500_000.0,
+            range: 10.0,
+            ..default()
+        },
+        Transform::from_xyz(new_pos.x, new_pos.y + cell_size / 2.0, new_pos.z),
     ));
 }
 
-fn check_door_click(
-    mouse_button: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    camera_query: Query<(&Camera, &GlobalTransform)>,
-    player_query: Query<&Transform, With<Player>>,
-    mut door_query: Query<(&Transform, &Collider, &mut Door)>,
-    mut door_message: ResMut<DoorMessage>,
-    config: Res<GameConfig>,
+fn check_win_condition(
+    player_query: Query<&CellTransform, With<Player>>,
+    goal_cell_id: Res<GoalCellId>,
+    mut win_state: ResMut<WinState>,
+    mut win_text_query: Query<&mut Visibility, With<WinText>>,
 ) {
-    // Check if left mouse button was just pressed
-    if !mouse_button.just_pressed(MouseButton::Left) {
+    if win_state.0 {
         return;
     }
 
-    let Ok(window) = windows.single() else {
-        return;
-    };
+    let Some(goal_id) = goal_cell_id.0 else { return; };
+    let Ok(cell_tf) = player_query.single() else { return; };
 
-    let Some(cursor_position) = window.cursor_position() else {
-        return;
-    };
-
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
-
-    let Ok(player_transform) = player_query.single() else {
-        return;
-    };
-
-    let Ok((door_transform, door_collider, mut door)) = door_query.single_mut() else {
-        return;
-    };
-
-    // Skip if already found
-    if door.found {
-        return;
-    }
-
-    // Create ray from camera through cursor position
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_position) else {
-        return;
-    };
-
-    // Check if ray intersects with door's AABB
-    let door_pos = door_transform.translation;
-    let door_min = door_pos - door_collider.size * 0.5;
-    let door_max = door_pos + door_collider.size * 0.5;
-
-    if ray_intersects_aabb(ray.origin, *ray.direction, door_min, door_max) {
-        // Check if player is within grid_unit distance
-        let player_pos = player_transform.translation;
-        let distance = player_pos.distance(door_pos);
-
-        if distance <= config.player.grid_unit {
-            door.found = true;
-            door_message.text = "You found the door!".to_string();
-            door_message.timer = 5.0; // Show for 5 seconds
-        } else {
-            door_message.text = "Move closer to the door!".to_string();
-            door_message.timer = 3.0; // Show for 3 seconds
+    if cell_tf.cell == goal_id {
+        win_state.0 = true;
+        if let Ok(mut visibility) = win_text_query.single_mut() {
+            *visibility = Visibility::Visible;
         }
     }
-}
-
-/// Ray-AABB intersection test
-fn ray_intersects_aabb(origin: Vec3, direction: Vec3, aabb_min: Vec3, aabb_max: Vec3) -> bool {
-    let dir_inv = Vec3::new(
-        1.0 / direction.x,
-        1.0 / direction.y,
-        1.0 / direction.z,
-    );
-
-    let t1 = (aabb_min.x - origin.x) * dir_inv.x;
-    let t2 = (aabb_max.x - origin.x) * dir_inv.x;
-    let t3 = (aabb_min.y - origin.y) * dir_inv.y;
-    let t4 = (aabb_max.y - origin.y) * dir_inv.y;
-    let t5 = (aabb_min.z - origin.z) * dir_inv.z;
-    let t6 = (aabb_max.z - origin.z) * dir_inv.z;
-
-    let tmin = t1.min(t2).max(t3.min(t4)).max(t5.min(t6));
-    let tmax = t1.max(t2).min(t3.max(t4)).min(t5.max(t6));
-
-    // If tmax < 0, ray is intersecting AABB but the whole AABB is behind us
-    if tmax < 0.0 {
-        return false;
-    }
-
-    // If tmin > tmax, ray doesn't intersect AABB
-    if tmin > tmax {
-        return false;
-    }
-
-    true
-}
-
-fn update_door_message(
-    mut door_message: ResMut<DoorMessage>,
-    time: Res<Time>,
-) {
-    if door_message.timer > 0.0 {
-        door_message.timer -= time.delta_secs();
-        if door_message.timer <= 0.0 {
-            door_message.text = "Find the door and click on it to win!".to_string();
-        }
-    }
-}
-
-fn update_door_message_ui(
-    door_message: Res<DoorMessage>,
-    config: Res<GameConfig>,
-    mut message_text_query: Query<&mut Text, With<DoorMessageText>>,
-) {
-    let Ok(mut text) = message_text_query.single_mut() else {
-        return;
-    };
-
-    // Build the full message with controls
-    let message_with_controls = format!(
-        "{}\n\nCONTROLS: {} {} {} {} - Move | {} {} - Turn | {} - Look | Click - Interact",
-        door_message.text,
-        config.controls.move_forward,
-        config.controls.move_backward,
-        config.controls.move_left,
-        config.controls.move_right,
-        config.controls.rotate_left,
-        config.controls.rotate_right,
-        config.controls.look_hold,
-    );
-
-    text.0 = message_with_controls;
 }
