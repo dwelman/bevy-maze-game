@@ -248,10 +248,8 @@ mod tests {
     #[test]
     fn boundary_faces_all_directions_when_no_connections() {
         let cell = make_cell(1, 0.0, 0.0, 0.0);
-        let mut faces = cell.boundary_faces();
-        faces.sort_by_key(|d| format!("{:?}", d));
-        let mut expected: Vec<Direction> = Direction::all().into_iter().collect();
-        expected.sort_by_key(|d| format!("{:?}", d));
+        let faces: std::collections::HashSet<Direction> = cell.boundary_faces().into_iter().collect();
+        let expected: std::collections::HashSet<Direction> = Direction::all().into_iter().collect();
         assert_eq!(faces, expected);
     }
 

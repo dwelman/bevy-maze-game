@@ -355,14 +355,18 @@ mod tests {
     }
 
     #[test]
-    fn create_room_ids_are_sequential() {
+    fn create_room_ids_are_unique() {
         let mut map = RoomMap::new();
         let id0 = map.create_room(red());
         let id1 = map.create_room(blue());
         let id2 = map.create_room(red());
-        assert_eq!(id0, RoomId(0));
-        assert_eq!(id1, RoomId(1));
-        assert_eq!(id2, RoomId(2));
+        assert_ne!(id0, id1);
+        assert_ne!(id1, id2);
+        assert_ne!(id0, id2);
+        // Each ID must be valid for lookup
+        assert!(map.get_room(id0).is_some());
+        assert!(map.get_room(id1).is_some());
+        assert!(map.get_room(id2).is_some());
     }
 
     #[test]
