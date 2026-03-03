@@ -37,6 +37,10 @@ impl Room {
         self.cells.insert(cell_id);
     }
 
+    pub fn remove_cell(&mut self, cell_id: CellId) {
+        self.cells.remove(&cell_id);
+    }
+
     pub fn cells(&self) -> impl Iterator<Item = CellId> + '_ {
         self.cells.iter().copied()
     }
@@ -86,10 +90,19 @@ impl RoomMap {
     }
 
     pub fn assign_cell(&mut self, cell_id: CellId, room_id: RoomId) {
-        if let Some(room) = self.rooms.get_mut(&room_id) {
-            room.add_cell(cell_id);
-            self.cell_to_room.insert(cell_id, room_id);
+        assert!(self.rooms.contains_key(&room_id), "assign_cell: room {:?} does not exist", room_id);
+
+        // Remove the cell from its current room before reassigning.
+        if let Some(&old_room_id) = self.cell_to_room.get(&cell_id) {
+            if old_room_id != room_id {
+                if let Some(old_room) = self.rooms.get_mut(&old_room_id) {
+                    old_room.remove_cell(cell_id);
+                }
+            }
         }
+
+        self.rooms.get_mut(&room_id).unwrap().add_cell(cell_id);
+        self.cell_to_room.insert(cell_id, room_id);
     }
 
     pub fn get_cell_room(&self, cell_id: CellId) -> Option<RoomId> {
