@@ -14,6 +14,7 @@ use system::movement::{
     handle_player_input, update_lerp_rotation, update_cell_movement,
     CellTransform, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
+use system::visibility::{update_visible_cells, apply_cell_visibility, VisibleCells};
 use map::{CellGraph, CellId, CardinalDirection, RoomMap, spawn_cell_walls};
 
 #[derive(Deserialize, Clone, Debug)]
@@ -185,8 +186,12 @@ fn main() {
         .insert_resource(DebugVisible(false))
         .insert_resource(WinState(false))
         .init_resource::<GoalCellId>()
+        .init_resource::<VisibleCells>()
         .add_systems(Startup, (setup_rooms, setup_goal_cell, setup, spawn_cell_walls).chain())
         .add_systems(Update, (handle_player_input, update_cell_movement, update_lerp_rotation))
+        .add_systems(Update, (update_visible_cells, apply_cell_visibility).chain()
+            .after(update_cell_movement)
+            .after(update_lerp_rotation))
         .add_systems(Update, (toggle_camera_look_mode, handle_camera_look, update_camera_look_lerp))
         .add_systems(Update, (toggle_debug_text, update_debug_text))
         .add_systems(Update, check_win_condition)
@@ -321,6 +326,7 @@ fn setup_rooms(
     let room_0_id = room_map.create_room(random_room_color(&mut rng));
     let room_1_id = room_map.create_room(random_room_color(&mut rng));
     let room_2_id = room_map.create_room(random_room_color(&mut rng));
+    let room_3_id = room_map.create_room(random_room_color(&mut rng));
 
     // Room 0: 2x2 square (player starts here at 0,0,0)
     let r0c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
@@ -359,6 +365,25 @@ fn setup_rooms(
     room_map.assign_cell(r2c0, room_2_id);
     room_map.assign_cell(r2c1, room_2_id);
 
+    // Room 3: U-shaped corridor looping south of room 0
+    // r3c4 overlaps r0c1 in world space to test non-Euclidean visibility
+    let r3c0 = graph.add_cell(Vec3::new(0.0, 0.0, cell_size));
+    let r3c1 = graph.add_cell(Vec3::new(0.0, 0.0, cell_size * 2.0));
+    let r3c2 = graph.add_cell(Vec3::new(cell_size, 0.0, cell_size * 2.0));
+    let r3c3 = graph.add_cell(Vec3::new(cell_size, 0.0, cell_size));
+    let r3c4 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0)); // overlaps r0c1
+
+    graph.connect_cells(r3c0, CardinalDirection::South, r3c1);
+    graph.connect_cells(r3c1, CardinalDirection::East, r3c2);
+    graph.connect_cells(r3c2, CardinalDirection::North, r3c3);
+    graph.connect_cells(r3c3, CardinalDirection::North, r3c4);
+
+    room_map.assign_cell(r3c0, room_3_id);
+    room_map.assign_cell(r3c1, room_3_id);
+    room_map.assign_cell(r3c2, room_3_id);
+    room_map.assign_cell(r3c3, room_3_id);
+    room_map.assign_cell(r3c4, room_3_id);
+
     // Connect rooms via edge cells (both in the graph and in the room map)
     // Room 0 north edge -> Room 1 south edge
     graph.connect_cells(r0c2, CardinalDirection::North, r1c0);
@@ -367,6 +392,10 @@ fn setup_rooms(
     // Room 0 east edge -> Room 2 west edge
     graph.connect_cells(r0c1, CardinalDirection::East, r2c0);
     room_map.connect_rooms(room_0_id, r0c1, CardinalDirection::East, room_2_id, r2c0);
+
+    // Room 0 south edge -> Room 3 north edge (exit)
+    graph.connect_cells(r0c0, CardinalDirection::South, r3c0);
+    room_map.connect_rooms(room_0_id, r0c0, CardinalDirection::South, room_3_id, r3c0);
 
     // Spawn a point light in each cell
     for cell in graph.cells() {
