@@ -27,7 +27,7 @@ pub fn update_visible_cells(
     player_query: Query<(&CellTransform, &TargetCell, &TargetFacing)>,
     graph: Res<CellGraph>,
     mut visible: ResMut<VisibleCells>,
-    mut last_state: Local<Option<(CellId, CardinalDirection)>>,
+    mut last_state: Local<Option<(CellId, CardinalDirection, bool)>>,
 ) {
     let Ok((cell_tf, target_cell, target_facing)) = player_query.single() else {
         return;
@@ -35,14 +35,24 @@ pub fn update_visible_cells(
 
     let effective_cell = target_cell.0.unwrap_or(cell_tf.cell);
     let effective_facing = target_facing.0.unwrap_or(cell_tf.facing);
-    let current_state = (effective_cell, effective_facing);
+    let transitioning = target_cell.0.is_some() || target_facing.0.is_some();
+    let current_state = (effective_cell, effective_facing, transitioning);
     if *last_state == Some(current_state) {
         return;
     }
 
     *last_state = Some(current_state);
-    visible.cells.clear();
-    compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+
+    if transitioning {
+        // During movement/rotation, keep previously visible cells and add the
+        // destination's visibility on top. This prevents cells from flickering
+        // out mid-transition (e.g. when moving backwards).
+        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+    } else {
+        // Idle — clear and recompute from scratch so stale cells are pruned.
+        visible.cells.clear();
+        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+    }
 }
 
 /// Sets `Visibility::Hidden` or `Visibility::Visible` on every `CellWall` and
