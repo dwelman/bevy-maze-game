@@ -13,6 +13,7 @@ use system::camera::{
 use system::movement::{
     handle_player_input, update_lerp_rotation, update_cell_movement,
     CellTransform, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
+    TargetCell, TargetFacing,
 };
 use system::visibility::{update_visible_cells, apply_cell_visibility, VisibleCells};
 use map::{CellGraph, CellId, CardinalDirection, RoomMap, spawn_cell_walls};
@@ -245,8 +246,9 @@ fn setup(
             target_position: Vec3::new(0.0, player_y, 0.0),
             start_position: Vec3::new(0.0, player_y, 0.0),
             lerp_progress: 0.0,
-            pending_cell: None,
         },
+        TargetCell::default(),
+        TargetFacing::default(),
         LerpRotation {
             rotation_delta: 0.0,
             target_rotation: initial_rotation,

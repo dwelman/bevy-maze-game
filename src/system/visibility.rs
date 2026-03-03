@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use crate::map::wall::{CellDoorway, CellWall};
 use crate::map::{CellGraph, CellId, CardinalDirection};
-use crate::system::movement::CellTransform;
+use crate::system::movement::{CellTransform, TargetCell, TargetFacing};
 
 /// Tracks which cells are currently visible to the player based on
 /// topology-driven line-of-sight through the cell graph.
@@ -24,23 +24,25 @@ impl VisibleCells {
 /// system writes to `CellTransform` every frame (triggering change detection even
 /// when the value hasn't actually changed).
 pub fn update_visible_cells(
-    player_query: Query<&CellTransform>,
+    player_query: Query<(&CellTransform, &TargetCell, &TargetFacing)>,
     graph: Res<CellGraph>,
     mut visible: ResMut<VisibleCells>,
     mut last_state: Local<Option<(CellId, CardinalDirection)>>,
 ) {
-    let Ok(cell_tf) = player_query.single() else {
+    let Ok((cell_tf, target_cell, target_facing)) = player_query.single() else {
         return;
     };
 
-    let current_state = (cell_tf.cell, cell_tf.facing);
+    let effective_cell = target_cell.0.unwrap_or(cell_tf.cell);
+    let effective_facing = target_facing.0.unwrap_or(cell_tf.facing);
+    let current_state = (effective_cell, effective_facing);
     if *last_state == Some(current_state) {
         return;
     }
 
     *last_state = Some(current_state);
     visible.cells.clear();
-    compute_visible_cells(cell_tf.cell, cell_tf.facing, &graph, &mut visible.cells);
+    compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
 }
 
 /// Sets `Visibility::Hidden` or `Visibility::Visible` on every `CellWall` and
