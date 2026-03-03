@@ -1,7 +1,7 @@
 use bevy::math::Vec3;
 use std::collections::HashMap;
 
-use crate::map::Direction;
+use crate::map::CardinalDirection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellId(pub u32);
@@ -10,7 +10,7 @@ pub struct CellId(pub u32);
 pub struct Cell {
     id: CellId,
     position: Vec3,
-    connections: HashMap<Direction, CellId>,
+    connections: HashMap<CardinalDirection, CellId>,
 }
 
 impl Cell {
@@ -34,28 +34,28 @@ impl Cell {
     }
 
     /// Connects this cell to a neighbor in the given direction
-    pub fn connect(&mut self, direction: Direction, neighbor: CellId) {
+    pub fn connect(&mut self, direction: CardinalDirection, neighbor: CellId) {
         self.connections.insert(direction, neighbor);
     }
 
     /// Disconnects the neighbor in the given direction, returning the previous neighbor if any
-    pub fn disconnect(&mut self, direction: Direction) -> Option<CellId> {
+    pub fn disconnect(&mut self, direction: CardinalDirection) -> Option<CellId> {
         self.connections.remove(&direction)
     }
 
     /// Returns the neighbor cell ID in the given direction, if any
-    pub fn get_neighbor(&self, direction: Direction) -> Option<CellId> {
+    pub fn get_neighbor(&self, direction: CardinalDirection) -> Option<CellId> {
         self.connections.get(&direction).copied()
     }
 
     /// Returns true if this cell has a neighbor in the given direction
-    pub fn has_neighbor(&self, direction: Direction) -> bool {
+    pub fn has_neighbor(&self, direction: CardinalDirection) -> bool {
         self.connections.contains_key(&direction)
     }
 
     /// Returns a list of directions that don't have neighbors (boundary faces)
-    pub fn boundary_faces(&self) -> Vec<Direction> {
-        Direction::all()
+    pub fn boundary_faces(&self) -> Vec<CardinalDirection> {
+        CardinalDirection::all()
             .into_iter()
             .filter(|dir| !self.has_neighbor(*dir))
             .collect()
@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn new_starts_with_no_connections() {
         let cell = make_cell(1, 0.0, 0.0, 0.0);
-        for dir in Direction::all() {
+        for dir in CardinalDirection::all() {
             assert!(!cell.has_neighbor(dir));
         }
     }
@@ -132,28 +132,28 @@ mod tests {
     #[test]
     fn connect_creates_neighbor() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::North, CellId(2));
-        assert_eq!(cell.get_neighbor(Direction::North), Some(CellId(2)));
+        cell.connect(CardinalDirection::North, CellId(2));
+        assert_eq!(cell.get_neighbor(CardinalDirection::North), Some(CellId(2)));
     }
 
     #[test]
     fn connect_overwrites_existing_neighbor() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::North, CellId(2));
-        cell.connect(Direction::North, CellId(99));
-        assert_eq!(cell.get_neighbor(Direction::North), Some(CellId(99)));
+        cell.connect(CardinalDirection::North, CellId(2));
+        cell.connect(CardinalDirection::North, CellId(99));
+        assert_eq!(cell.get_neighbor(CardinalDirection::North), Some(CellId(99)));
     }
 
     #[test]
     fn connect_all_directions() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
         let neighbors = [
-            (Direction::North, CellId(2)),
-            (Direction::South, CellId(3)),
-            (Direction::East, CellId(4)),
-            (Direction::West, CellId(5)),
-            (Direction::Up, CellId(6)),
-            (Direction::Down, CellId(7)),
+            (CardinalDirection::North, CellId(2)),
+            (CardinalDirection::South, CellId(3)),
+            (CardinalDirection::East, CellId(4)),
+            (CardinalDirection::West, CellId(5)),
+            (CardinalDirection::Zenith, CellId(6)),
+            (CardinalDirection::Nadir, CellId(7)),
         ];
         for (dir, id) in neighbors {
             cell.connect(dir, id);
@@ -168,33 +168,33 @@ mod tests {
     #[test]
     fn disconnect_returns_previous_neighbor() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::South, CellId(10));
-        let removed = cell.disconnect(Direction::South);
+        cell.connect(CardinalDirection::South, CellId(10));
+        let removed = cell.disconnect(CardinalDirection::South);
         assert_eq!(removed, Some(CellId(10)));
     }
 
     #[test]
     fn disconnect_removes_connection() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::South, CellId(10));
-        cell.disconnect(Direction::South);
-        assert!(!cell.has_neighbor(Direction::South));
+        cell.connect(CardinalDirection::South, CellId(10));
+        cell.disconnect(CardinalDirection::South);
+        assert!(!cell.has_neighbor(CardinalDirection::South));
     }
 
     #[test]
     fn disconnect_empty_direction_returns_none() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        let removed = cell.disconnect(Direction::East);
+        let removed = cell.disconnect(CardinalDirection::East);
         assert_eq!(removed, None);
     }
 
     #[test]
     fn disconnect_then_reconnect() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::West, CellId(5));
-        cell.disconnect(Direction::West);
-        cell.connect(Direction::West, CellId(99));
-        assert_eq!(cell.get_neighbor(Direction::West), Some(CellId(99)));
+        cell.connect(CardinalDirection::West, CellId(5));
+        cell.disconnect(CardinalDirection::West);
+        cell.connect(CardinalDirection::West, CellId(99));
+        assert_eq!(cell.get_neighbor(CardinalDirection::West), Some(CellId(99)));
     }
 
     // --- Cell::get_neighbor ---
@@ -202,22 +202,22 @@ mod tests {
     #[test]
     fn get_neighbor_returns_some_when_connected() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::Up, CellId(8));
-        assert_eq!(cell.get_neighbor(Direction::Up), Some(CellId(8)));
+        cell.connect(CardinalDirection::Zenith, CellId(8));
+        assert_eq!(cell.get_neighbor(CardinalDirection::Zenith), Some(CellId(8)));
     }
 
     #[test]
     fn get_neighbor_returns_none_when_unconnected() {
         let cell = make_cell(1, 0.0, 0.0, 0.0);
-        assert_eq!(cell.get_neighbor(Direction::Down), None);
+        assert_eq!(cell.get_neighbor(CardinalDirection::Nadir), None);
     }
 
     #[test]
     fn get_neighbor_unaffected_by_other_directions() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::North, CellId(2));
-        assert_eq!(cell.get_neighbor(Direction::South), None);
-        assert_eq!(cell.get_neighbor(Direction::East), None);
+        cell.connect(CardinalDirection::North, CellId(2));
+        assert_eq!(cell.get_neighbor(CardinalDirection::South), None);
+        assert_eq!(cell.get_neighbor(CardinalDirection::East), None);
     }
 
     // --- Cell::has_neighbor ---
@@ -225,22 +225,22 @@ mod tests {
     #[test]
     fn has_neighbor_true_when_connected() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::East, CellId(3));
-        assert!(cell.has_neighbor(Direction::East));
+        cell.connect(CardinalDirection::East, CellId(3));
+        assert!(cell.has_neighbor(CardinalDirection::East));
     }
 
     #[test]
     fn has_neighbor_false_when_not_connected() {
         let cell = make_cell(1, 0.0, 0.0, 0.0);
-        assert!(!cell.has_neighbor(Direction::West));
+        assert!(!cell.has_neighbor(CardinalDirection::West));
     }
 
     #[test]
     fn has_neighbor_false_after_disconnect() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::Up, CellId(6));
-        cell.disconnect(Direction::Up);
-        assert!(!cell.has_neighbor(Direction::Up));
+        cell.connect(CardinalDirection::Zenith, CellId(6));
+        cell.disconnect(CardinalDirection::Zenith);
+        assert!(!cell.has_neighbor(CardinalDirection::Zenith));
     }
 
     // --- Cell::boundary_faces ---
@@ -248,26 +248,26 @@ mod tests {
     #[test]
     fn boundary_faces_all_directions_when_no_connections() {
         let cell = make_cell(1, 0.0, 0.0, 0.0);
-        let faces: std::collections::HashSet<Direction> = cell.boundary_faces().into_iter().collect();
-        let expected: std::collections::HashSet<Direction> = Direction::all().into_iter().collect();
+        let faces: std::collections::HashSet<CardinalDirection> = cell.boundary_faces().into_iter().collect();
+        let expected: std::collections::HashSet<CardinalDirection> = CardinalDirection::all().into_iter().collect();
         assert_eq!(faces, expected);
     }
 
     #[test]
     fn boundary_faces_excludes_connected_directions() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        cell.connect(Direction::North, CellId(2));
-        cell.connect(Direction::East, CellId(3));
+        cell.connect(CardinalDirection::North, CellId(2));
+        cell.connect(CardinalDirection::East, CellId(3));
         let faces = cell.boundary_faces();
-        assert!(!faces.contains(&Direction::North));
-        assert!(!faces.contains(&Direction::East));
+        assert!(!faces.contains(&CardinalDirection::North));
+        assert!(!faces.contains(&CardinalDirection::East));
         assert_eq!(faces.len(), 4);
     }
 
     #[test]
     fn boundary_faces_empty_when_all_connected() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        for (i, dir) in Direction::all().into_iter().enumerate() {
+        for (i, dir) in CardinalDirection::all().into_iter().enumerate() {
             cell.connect(dir, CellId(i as u32 + 2));
         }
         assert!(cell.boundary_faces().is_empty());
@@ -276,11 +276,11 @@ mod tests {
     #[test]
     fn boundary_faces_updates_after_disconnect() {
         let mut cell = make_cell(1, 0.0, 0.0, 0.0);
-        for (i, dir) in Direction::all().into_iter().enumerate() {
+        for (i, dir) in CardinalDirection::all().into_iter().enumerate() {
             cell.connect(dir, CellId(i as u32 + 2));
         }
-        cell.disconnect(Direction::Down);
+        cell.disconnect(CardinalDirection::Nadir);
         let faces = cell.boundary_faces();
-        assert_eq!(faces, vec![Direction::Down]);
+        assert_eq!(faces, vec![CardinalDirection::Nadir]);
     }
 }

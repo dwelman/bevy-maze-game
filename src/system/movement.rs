@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{Controls, GameConfig};
-use crate::map::{CellGraph, CellId, Direction};
+use crate::map::{CellGraph, CellId, CardinalDirection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MovementState {
@@ -51,7 +51,7 @@ pub struct CellTransform {
     /// The cell the entity is currently occupying.
     pub cell: CellId,
     /// The cardinal direction the entity is facing (always N / S / E / W).
-    pub facing: Direction,
+    pub facing: CardinalDirection,
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ pub struct CellTransform {
 /// connections in the [`CellGraph`].
 ///
 /// The stored `facing` is used to resolve the input delta into an absolute
-/// cardinal [`Direction`] without touching the `Transform` quaternion.
+/// cardinal [`CardinalDirection`] without touching the `Transform` quaternion.
 /// Movement is silently blocked when no connection exists (i.e. there is a wall).
 pub fn update_cell_movement(
     time: Res<Time>,
@@ -268,9 +268,9 @@ pub fn update_lerp_rotation(
                 // Bevy objects face -Z by default; rotate that into world space.
                 let world_fwd = transform.rotation * Vec3::NEG_Z;
                 let new_facing = if world_fwd.x.abs() >= world_fwd.z.abs() {
-                    if world_fwd.x >= 0.0 { Direction::East } else { Direction::West }
+                    if world_fwd.x >= 0.0 { CardinalDirection::East } else { CardinalDirection::West }
                 } else {
-                    if world_fwd.z >= 0.0 { Direction::South } else { Direction::North }
+                    if world_fwd.z >= 0.0 { CardinalDirection::South } else { CardinalDirection::North }
                 };
                 cell_tf.facing = new_facing;
             }

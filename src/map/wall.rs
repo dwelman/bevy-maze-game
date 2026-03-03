@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
-use crate::map::{CellGraph, Direction, RoomId, RoomMap};
+use crate::map::{CellGraph, CardinalDirection, RoomId, RoomMap};
 use crate::GoalCellId;
 
 const WALL_THICKNESS: f32 = 0.01;
@@ -10,13 +10,13 @@ const DOORWAY_HEIGHT: f32 = 2.0;
 #[derive(Component)]
 pub struct CellWall {
     pub cell_id: crate::map::CellId,
-    pub direction: Direction,
+    pub direction: CardinalDirection,
 }
 
 #[derive(Component)]
 pub struct CellDoorway {
     pub cell_id: crate::map::CellId,
-    pub direction: Direction,
+    pub direction: CardinalDirection,
 }
 
 /// Spawns walls for all boundary faces in the cell graph
@@ -88,7 +88,7 @@ pub fn spawn_cell_walls(
         // Each cell spawns its own side of the doorway using its own room's colour,
         // so the frame matches the room you're standing in from both directions.
         let cell_room = room_map.get_cell_room(cell_id);
-        for direction in Direction::all() {
+        for direction in CardinalDirection::all() {
             if let Some(neighbor_id) = cell.get_neighbor(direction) {
                 let neighbor_room = room_map.get_cell_room(neighbor_id);
 
@@ -115,36 +115,36 @@ pub fn spawn_cell_walls(
 }
 
 /// Calculates the size and offset for a wall based on direction and cell size
-fn calculate_wall_geometry(direction: Direction, cell_size: f32) -> (Vec3, Vec3) {
+fn calculate_wall_geometry(direction: CardinalDirection, cell_size: f32) -> (Vec3, Vec3) {
     let half_cell = cell_size / 2.0;
 
     match direction {
-        Direction::North => {
+        CardinalDirection::North => {
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
             let offset = Vec3::new(0.0, 0.0, -half_cell + WALL_THICKNESS / 2.0);
             (size, offset)
         }
-        Direction::South => {
+        CardinalDirection::South => {
             let size = Vec3::new(cell_size, cell_size, WALL_THICKNESS);
             let offset = Vec3::new(0.0, 0.0, half_cell - WALL_THICKNESS / 2.0);
             (size, offset)
         }
-        Direction::East => {
+        CardinalDirection::East => {
             let size = Vec3::new(WALL_THICKNESS, cell_size, cell_size);
             let offset = Vec3::new(half_cell - WALL_THICKNESS / 2.0, 0.0, 0.0);
             (size, offset)
         }
-        Direction::West => {
+        CardinalDirection::West => {
             let size = Vec3::new(WALL_THICKNESS, cell_size, cell_size);
             let offset = Vec3::new(-half_cell + WALL_THICKNESS / 2.0, 0.0, 0.0);
             (size, offset)
         }
-        Direction::Up => {
+        CardinalDirection::Zenith => {
             let size = Vec3::new(cell_size, WALL_THICKNESS, cell_size);
             let offset = Vec3::new(0.0, half_cell - WALL_THICKNESS / 2.0, 0.0);
             (size, offset)
         }
-        Direction::Down => {
+        CardinalDirection::Nadir => {
             let size = Vec3::new(cell_size, WALL_THICKNESS, cell_size);
             let offset = Vec3::new(0.0, -half_cell + WALL_THICKNESS / 2.0, 0.0);
             (size, offset)
@@ -155,7 +155,7 @@ fn calculate_wall_geometry(direction: Direction, cell_size: f32) -> (Vec3, Vec3)
 /// Calculates the geometry for the 3 frame pieces of a doorway (top bar, left side, right side).
 /// The cutout is DOORWAY_WIDTH wide and DOORWAY_HEIGHT tall, centered horizontally, touching the floor.
 /// Returns a Vec of (size, offset) pairs relative to the cell center.
-fn calculate_doorway_pieces(direction: Direction, cell_size: f32) -> Vec<(Vec3, Vec3)> {
+fn calculate_doorway_pieces(direction: CardinalDirection, cell_size: f32) -> Vec<(Vec3, Vec3)> {
     let half_cell = cell_size / 2.0;
     let half_door_w = DOORWAY_WIDTH / 2.0;
     let door_top_y = -half_cell + DOORWAY_HEIGHT; // Y of top of cutout (relative to cell center)
@@ -167,7 +167,7 @@ fn calculate_doorway_pieces(direction: Direction, cell_size: f32) -> Vec<(Vec3, 
     let side_center_y = (-half_cell + door_top_y) / 2.0;
 
     match direction {
-        Direction::North => {
+        CardinalDirection::North => {
             let z = -half_cell + WALL_THICKNESS / 2.0;
             vec![
                 // Top bar: full cell width
@@ -181,7 +181,7 @@ fn calculate_doorway_pieces(direction: Direction, cell_size: f32) -> Vec<(Vec3, 
                  Vec3::new((half_door_w + half_cell) / 2.0, side_center_y, z)),
             ]
         }
-        Direction::South => {
+        CardinalDirection::South => {
             let z = half_cell - WALL_THICKNESS / 2.0;
             vec![
                 (Vec3::new(cell_size, top_height, WALL_THICKNESS),
@@ -192,7 +192,7 @@ fn calculate_doorway_pieces(direction: Direction, cell_size: f32) -> Vec<(Vec3, 
                  Vec3::new((half_door_w + half_cell) / 2.0, side_center_y, z)),
             ]
         }
-        Direction::East => {
+        CardinalDirection::East => {
             let x = half_cell - WALL_THICKNESS / 2.0;
             vec![
                 // Top bar: full cell width along Z
@@ -206,7 +206,7 @@ fn calculate_doorway_pieces(direction: Direction, cell_size: f32) -> Vec<(Vec3, 
                  Vec3::new(x, side_center_y, (half_door_w + half_cell) / 2.0)),
             ]
         }
-        Direction::West => {
+        CardinalDirection::West => {
             let x = -half_cell + WALL_THICKNESS / 2.0;
             vec![
                 (Vec3::new(WALL_THICKNESS, top_height, cell_size),
@@ -217,6 +217,6 @@ fn calculate_doorway_pieces(direction: Direction, cell_size: f32) -> Vec<(Vec3, 
                  Vec3::new(x, side_center_y, (half_door_w + half_cell) / 2.0)),
             ]
         }
-        Direction::Up | Direction::Down => vec![],
+        CardinalDirection::Zenith | CardinalDirection::Nadir => vec![],
     }
 }

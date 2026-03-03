@@ -1,37 +1,37 @@
 use bevy::math::{Quat, Vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Direction {
-    North, // -Z (Bevy forward)
-    South, // +Z (Bevy backward)
-    East,  // +X
-    West,  // -X
-    Up,    // +Y
-    Down,  // -Y
+pub enum CardinalDirection {
+    North,  // -Z (Bevy forward)
+    South,  // +Z (Bevy backward)
+    East,   // +X
+    West,   // -X
+    Zenith, // +Y
+    Nadir,  // -Y
 }
 
-impl Direction {
+impl CardinalDirection {
     /// Returns the opposite direction
-    pub fn opposite(self) -> Direction {
+    pub fn opposite(self) -> CardinalDirection {
         match self {
-            Direction::North => Direction::South,
-            Direction::South => Direction::North,
-            Direction::East => Direction::West,
-            Direction::West => Direction::East,
-            Direction::Up => Direction::Down,
-            Direction::Down => Direction::Up,
+            CardinalDirection::North => CardinalDirection::South,
+            CardinalDirection::South => CardinalDirection::North,
+            CardinalDirection::East => CardinalDirection::West,
+            CardinalDirection::West => CardinalDirection::East,
+            CardinalDirection::Zenith => CardinalDirection::Nadir,
+            CardinalDirection::Nadir => CardinalDirection::Zenith,
         }
     }
 
     /// Converts direction to a unit vector
     pub fn to_vec3(self) -> Vec3 {
         match self {
-            Direction::North => Vec3::new(0.0, 0.0, -1.0),
-            Direction::South => Vec3::new(0.0, 0.0, 1.0),
-            Direction::East => Vec3::new(1.0, 0.0, 0.0),
-            Direction::West => Vec3::new(-1.0, 0.0, 0.0),
-            Direction::Up => Vec3::new(0.0, 1.0, 0.0),
-            Direction::Down => Vec3::new(0.0, -1.0, 0.0),
+            CardinalDirection::North => Vec3::new(0.0, 0.0, -1.0),
+            CardinalDirection::South => Vec3::new(0.0, 0.0, 1.0),
+            CardinalDirection::East => Vec3::new(1.0, 0.0, 0.0),
+            CardinalDirection::West => Vec3::new(-1.0, 0.0, 0.0),
+            CardinalDirection::Zenith => Vec3::new(0.0, 1.0, 0.0),
+            CardinalDirection::Nadir => Vec3::new(0.0, -1.0, 0.0),
         }
     }
 
@@ -39,45 +39,45 @@ impl Direction {
     /// Assumes Bevy's default entity forward of -Z.
     pub fn to_quat(self) -> Quat {
         match self {
-            Direction::North => Quat::IDENTITY,
-            Direction::South => Quat::from_rotation_y(std::f32::consts::PI),
-            Direction::East  => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
-            Direction::West  => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
-            Direction::Up | Direction::Down => Quat::IDENTITY,
+            CardinalDirection::North => Quat::IDENTITY,
+            CardinalDirection::South => Quat::from_rotation_y(std::f32::consts::PI),
+            CardinalDirection::East  => Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2),
+            CardinalDirection::West  => Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            CardinalDirection::Zenith | CardinalDirection::Nadir => Quat::IDENTITY,
         }
     }
 
     /// Returns all six directions
-    pub fn all() -> [Direction; 6] {
+    pub fn all() -> [CardinalDirection; 6] {
         [
-            Direction::North,
-            Direction::South,
-            Direction::East,
-            Direction::West,
-            Direction::Up,
-            Direction::Down,
+            CardinalDirection::North,
+            CardinalDirection::South,
+            CardinalDirection::East,
+            CardinalDirection::West,
+            CardinalDirection::Zenith,
+            CardinalDirection::Nadir,
         ]
     }
 
     /// Returns the cardinal direction 90° clockwise when viewed from above.
-    pub fn turn_right(self) -> Direction {
+    pub fn turn_right(self) -> CardinalDirection {
         match self {
-            Direction::North => Direction::East,
-            Direction::East  => Direction::South,
-            Direction::South => Direction::West,
-            Direction::West  => Direction::North,
-            _                => self,
+            CardinalDirection::North => CardinalDirection::East,
+            CardinalDirection::East  => CardinalDirection::South,
+            CardinalDirection::South => CardinalDirection::West,
+            CardinalDirection::West  => CardinalDirection::North,
+            _                        => self,
         }
     }
 
     /// Returns the cardinal direction 90° counter-clockwise when viewed from above.
-    pub fn turn_left(self) -> Direction {
+    pub fn turn_left(self) -> CardinalDirection {
         match self {
-            Direction::North => Direction::West,
-            Direction::West  => Direction::South,
-            Direction::South => Direction::East,
-            Direction::East  => Direction::North,
-            _                => self,
+            CardinalDirection::North => CardinalDirection::West,
+            CardinalDirection::West  => CardinalDirection::South,
+            CardinalDirection::South => CardinalDirection::East,
+            CardinalDirection::East  => CardinalDirection::North,
+            _                        => self,
         }
     }
 }

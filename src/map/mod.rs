@@ -5,7 +5,7 @@ pub mod room;
 pub mod wall;
 
 pub use cell::{Cell, CellId};
-pub use direction::Direction;
+pub use direction::CardinalDirection;
 pub use graph::CellGraph;
 pub use room::{Room, RoomId, RoomMap};
 pub use wall::spawn_cell_walls;

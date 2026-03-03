@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use crate::map::{CellId, Direction};
+use crate::map::{CellId, CardinalDirection};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RoomId(pub u32);
@@ -12,7 +12,7 @@ pub struct Room {
     cells: HashSet<CellId>,
     color: Color,
     /// Maps (cell_id, direction) to (target_room_id, target_cell_id) for cross-room connections
-    exits: HashMap<(CellId, Direction), (RoomId, CellId)>,
+    exits: HashMap<(CellId, CardinalDirection), (RoomId, CellId)>,
 }
 
 impl Room {
@@ -49,11 +49,11 @@ impl Room {
         self.cells.contains(&cell_id)
     }
 
-    pub fn add_exit(&mut self, cell_id: CellId, direction: Direction, target_room: RoomId, target_cell: CellId) {
+    pub fn add_exit(&mut self, cell_id: CellId, direction: CardinalDirection, target_room: RoomId, target_cell: CellId) {
         self.exits.insert((cell_id, direction), (target_room, target_cell));
     }
 
-    pub fn exits(&self) -> impl Iterator<Item = (&(CellId, Direction), &(RoomId, CellId))> {
+    pub fn exits(&self) -> impl Iterator<Item = (&(CellId, CardinalDirection), &(RoomId, CellId))> {
         self.exits.iter()
     }
 }
@@ -118,7 +118,7 @@ impl RoomMap {
         &mut self,
         room_a: RoomId,
         cell_a: CellId,
-        direction: Direction,
+        direction: CardinalDirection,
         room_b: RoomId,
         cell_b: CellId,
     ) {
@@ -302,10 +302,10 @@ mod tests {
     #[test]
     fn add_exit_appears_in_exits_iterator() {
         let mut room = make_room(1, red());
-        room.add_exit(CellId(1), Direction::North, RoomId(2), CellId(5));
+        room.add_exit(CellId(1), CardinalDirection::North, RoomId(2), CellId(5));
         let exits: Vec<_> = room.exits().collect();
         assert_eq!(exits.len(), 1);
-        assert_eq!(exits[0].0, &(CellId(1), Direction::North));
+        assert_eq!(exits[0].0, &(CellId(1), CardinalDirection::North));
         assert_eq!(exits[0].1, &(RoomId(2), CellId(5)));
     }
 
@@ -318,16 +318,16 @@ mod tests {
     #[test]
     fn add_exit_multiple_exits() {
         let mut room = make_room(1, red());
-        room.add_exit(CellId(1), Direction::North, RoomId(2), CellId(10));
-        room.add_exit(CellId(1), Direction::East, RoomId(3), CellId(11));
+        room.add_exit(CellId(1), CardinalDirection::North, RoomId(2), CellId(10));
+        room.add_exit(CellId(1), CardinalDirection::East, RoomId(3), CellId(11));
         assert_eq!(room.exits().count(), 2);
     }
 
     #[test]
     fn add_exit_overwrites_same_key() {
         let mut room = make_room(1, red());
-        room.add_exit(CellId(1), Direction::North, RoomId(2), CellId(10));
-        room.add_exit(CellId(1), Direction::North, RoomId(9), CellId(99));
+        room.add_exit(CellId(1), CardinalDirection::North, RoomId(2), CellId(10));
+        room.add_exit(CellId(1), CardinalDirection::North, RoomId(9), CellId(99));
         let exits: Vec<_> = room.exits().collect();
         assert_eq!(exits.len(), 1);
         assert_eq!(exits[0].1, &(RoomId(9), CellId(99)));
@@ -470,13 +470,13 @@ mod tests {
         map.assign_cell(CellId(1), ra);
         map.assign_cell(CellId(2), rb);
 
-        map.connect_rooms(ra, CellId(1), Direction::North, rb, CellId(2));
+        map.connect_rooms(ra, CellId(1), CardinalDirection::North, rb, CellId(2));
 
         let room_a = map.get_room(ra).unwrap();
         let room_b = map.get_room(rb).unwrap();
 
-        assert!(room_a.exits().any(|(k, v)| *k == (CellId(1), Direction::North) && *v == (rb, CellId(2))));
-        assert!(room_b.exits().any(|(k, v)| *k == (CellId(2), Direction::South) && *v == (ra, CellId(1))));
+        assert!(room_a.exits().any(|(k, v)| *k == (CellId(1), CardinalDirection::North) && *v == (rb, CellId(2))));
+        assert!(room_b.exits().any(|(k, v)| *k == (CellId(2), CardinalDirection::South) && *v == (ra, CellId(1))));
     }
 
     #[test]
@@ -487,10 +487,10 @@ mod tests {
         map.assign_cell(CellId(1), ra);
         map.assign_cell(CellId(2), rb);
 
-        map.connect_rooms(ra, CellId(1), Direction::East, rb, CellId(2));
+        map.connect_rooms(ra, CellId(1), CardinalDirection::East, rb, CellId(2));
 
         let room_b = map.get_room(rb).unwrap();
-        assert!(room_b.exits().any(|(k, _)| k.1 == Direction::West));
+        assert!(room_b.exits().any(|(k, _)| k.1 == CardinalDirection::West));
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
         let mut map = RoomMap::new();
         let rb = map.create_room(blue());
         map.assign_cell(CellId(2), rb);
-        map.connect_rooms(RoomId(99), CellId(1), Direction::North, rb, CellId(2));
+        map.connect_rooms(RoomId(99), CellId(1), CardinalDirection::North, rb, CellId(2));
     }
 
     #[test]
@@ -508,7 +508,7 @@ mod tests {
         let mut map = RoomMap::new();
         let ra = map.create_room(red());
         map.assign_cell(CellId(1), ra);
-        map.connect_rooms(ra, CellId(1), Direction::North, RoomId(99), CellId(2));
+        map.connect_rooms(ra, CellId(1), CardinalDirection::North, RoomId(99), CellId(2));
     }
 
     // -------------------------------------------------------------------------

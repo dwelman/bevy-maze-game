@@ -2,7 +2,7 @@ use bevy::prelude::Resource;
 use bevy::math::Vec3;
 use std::collections::HashMap;
 
-use crate::map::{Cell, CellId, Direction};
+use crate::map::{Cell, CellId, CardinalDirection};
 
 #[derive(Resource)]
 pub struct CellGraph {
@@ -53,7 +53,7 @@ impl CellGraph {
     /// and from cell_b in the opposite direction back to cell_a.
     ///
     /// Returns true if both cells exist and were successfully connected.
-    pub fn connect_cells(&mut self, cell_a: CellId, direction: Direction, cell_b: CellId) -> bool {
+    pub fn connect_cells(&mut self, cell_a: CellId, direction: CardinalDirection, cell_b: CellId) -> bool {
         // Check that both cells exist
         if !self.cells.contains_key(&cell_a) || !self.cells.contains_key(&cell_b) {
             return false;
@@ -79,7 +79,7 @@ impl CellGraph {
     /// and from the connected neighbor back to cell_a.
     ///
     /// Returns true if cell_a exists and had a connection in that direction.
-    pub fn disconnect_cells(&mut self, cell_a: CellId, direction: Direction) -> bool {
+    pub fn disconnect_cells(&mut self, cell_a: CellId, direction: CardinalDirection) -> bool {
         // Get the neighbor ID before disconnecting
         let neighbor_id = match self.cells.get(&cell_a) {
             Some(cell) => cell.get_neighbor(direction),

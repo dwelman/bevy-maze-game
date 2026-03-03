@@ -14,7 +14,7 @@ use system::movement::{
     handle_player_input, update_lerp_rotation, update_cell_movement,
     CellTransform, LerpMovement, LerpRotation, InputRepeatTimer, MovementState,
 };
-use map::{CellGraph, CellId, Direction, RoomMap, spawn_cell_walls};
+use map::{CellGraph, CellId, CardinalDirection, RoomMap, spawn_cell_walls};
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -229,7 +229,7 @@ fn setup(
     let floor_height = graph.get_cell_floor_height(starting_cell.id()).unwrap();
 
     // Player entity (parent) - handles movement, rotation, and collision
-    let initial_facing = Direction::North;
+    let initial_facing = CardinalDirection::North;
     let initial_rotation = initial_facing.to_quat();
     let player = commands.spawn((
         Player,
@@ -328,10 +328,10 @@ fn setup_rooms(
     let r0c2 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size));
     let r0c3 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size));
 
-    graph.connect_cells(r0c0, Direction::East, r0c1);
-    graph.connect_cells(r0c0, Direction::North, r0c2);
-    graph.connect_cells(r0c1, Direction::North, r0c3);
-    graph.connect_cells(r0c2, Direction::East, r0c3);
+    graph.connect_cells(r0c0, CardinalDirection::East, r0c1);
+    graph.connect_cells(r0c0, CardinalDirection::North, r0c2);
+    graph.connect_cells(r0c1, CardinalDirection::North, r0c3);
+    graph.connect_cells(r0c2, CardinalDirection::East, r0c3);
 
     room_map.assign_cell(r0c0, room_0_id);
     room_map.assign_cell(r0c1, room_0_id);
@@ -343,8 +343,8 @@ fn setup_rooms(
     let r1c1 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 3.0));
     let r1c2 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size * 3.0));
 
-    graph.connect_cells(r1c0, Direction::North, r1c1);
-    graph.connect_cells(r1c1, Direction::East, r1c2);
+    graph.connect_cells(r1c0, CardinalDirection::North, r1c1);
+    graph.connect_cells(r1c1, CardinalDirection::East, r1c2);
 
     room_map.assign_cell(r1c0, room_1_id);
     room_map.assign_cell(r1c1, room_1_id);
@@ -354,19 +354,19 @@ fn setup_rooms(
     let r2c0 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, 0.0));
     let r2c1 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, -cell_size));
 
-    graph.connect_cells(r2c0, Direction::North, r2c1);
+    graph.connect_cells(r2c0, CardinalDirection::North, r2c1);
 
     room_map.assign_cell(r2c0, room_2_id);
     room_map.assign_cell(r2c1, room_2_id);
 
     // Connect rooms via edge cells (both in the graph and in the room map)
     // Room 0 north edge -> Room 1 south edge
-    graph.connect_cells(r0c2, Direction::North, r1c0);
-    room_map.connect_rooms(room_0_id, r0c2, Direction::North, room_1_id, r1c0);
+    graph.connect_cells(r0c2, CardinalDirection::North, r1c0);
+    room_map.connect_rooms(room_0_id, r0c2, CardinalDirection::North, room_1_id, r1c0);
 
     // Room 0 east edge -> Room 2 west edge
-    graph.connect_cells(r0c1, Direction::East, r2c0);
-    room_map.connect_rooms(room_0_id, r0c1, Direction::East, room_2_id, r2c0);
+    graph.connect_cells(r0c1, CardinalDirection::East, r2c0);
+    room_map.connect_rooms(room_0_id, r0c1, CardinalDirection::East, room_2_id, r2c0);
 
     // Spawn a point light in each cell
     for cell in graph.cells() {
@@ -470,9 +470,9 @@ fn setup_goal_cell(
     use rand::prelude::*;
 
     let cell_size = graph.cell_size();
-    let horizontal_directions = [Direction::North, Direction::South, Direction::East, Direction::West];
+    let horizontal_directions = [CardinalDirection::North, CardinalDirection::South, CardinalDirection::East, CardinalDirection::West];
 
-    let candidates: Vec<(CellId, Vec3, Direction)> = graph.cells()
+    let candidates: Vec<(CellId, Vec3, CardinalDirection)> = graph.cells()
         .flat_map(|cell| {
             let id = cell.id();
             let pos = cell.position();
