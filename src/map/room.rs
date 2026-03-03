@@ -109,7 +109,11 @@ impl RoomMap {
         self.cell_to_room.get(&cell_id).copied()
     }
 
-    /// Records a cross-room connection in both rooms
+    /// Records a cross-room connection in both rooms.
+    ///
+    /// Panics if either room does not exist.
+    /// In debug builds, also panics if `cell_a` does not belong to `room_a`
+    /// or `cell_b` does not belong to `room_b`.
     pub fn connect_rooms(
         &mut self,
         room_a: RoomId,
@@ -118,12 +122,21 @@ impl RoomMap {
         room_b: RoomId,
         cell_b: CellId,
     ) {
-        if let Some(room) = self.rooms.get_mut(&room_a) {
-            room.add_exit(cell_a, direction, room_b, cell_b);
-        }
-        if let Some(room) = self.rooms.get_mut(&room_b) {
-            room.add_exit(cell_b, direction.opposite(), room_a, cell_a);
-        }
+        assert!(self.rooms.contains_key(&room_a), "connect_rooms: room_a {:?} does not exist", room_a);
+        assert!(self.rooms.contains_key(&room_b), "connect_rooms: room_b {:?} does not exist", room_b);
+        debug_assert!(
+            self.rooms[&room_a].contains_cell(cell_a),
+            "connect_rooms: cell {:?} does not belong to room_a {:?}",
+            cell_a, room_a,
+        );
+        debug_assert!(
+            self.rooms[&room_b].contains_cell(cell_b),
+            "connect_rooms: cell {:?} does not belong to room_b {:?}",
+            cell_b, room_b,
+        );
+
+        self.rooms.get_mut(&room_a).unwrap().add_exit(cell_a, direction, room_b, cell_b);
+        self.rooms.get_mut(&room_b).unwrap().add_exit(cell_b, direction.opposite(), room_a, cell_a);
     }
 
     pub fn rooms(&self) -> impl Iterator<Item = &Room> {
