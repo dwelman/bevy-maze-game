@@ -129,10 +129,10 @@ fn cast_ray_with_perpendiculars(
     // Expand perpendiculars from the origin cell for this ray,
     // but never cast a perpendicular ray in the backward direction.
     if perp_left != backward {
-        cast_ray(origin, perp_left, graph, room_map, visible);
+        cast_ray(origin, perp_left, graph, visible);
     }
     if perp_right != backward {
-        cast_ray(origin, perp_right, graph, room_map, visible);
+        cast_ray(origin, perp_right, graph, visible);
     }
 
     // Walk the ray.
@@ -159,10 +159,10 @@ fn cast_ray_with_perpendiculars(
         let suppress_perps = crossed_doorway && ray_continues;
         if !suppress_perps {
             if perp_left != backward {
-                cast_ray(next_id, perp_left, graph, room_map, visible);
+                cast_ray(next_id, perp_left, graph, visible);
             }
             if perp_right != backward {
-                cast_ray(next_id, perp_right, graph, room_map, visible);
+                cast_ray(next_id, perp_right, graph, visible);
             }
         }
 
@@ -170,14 +170,12 @@ fn cast_ray_with_perpendiculars(
     }
 }
 
-/// Walks a straight line from `origin` in `direction` until hitting a wall
-/// or a doorway (room boundary), marking each cell as visible.
-/// Does not expand perpendiculars.
+/// Walks a straight line from `origin` in `direction` until hitting a wall,
+/// marking each cell as visible. Does not expand perpendiculars.
 fn cast_ray(
     origin: CellId,
     direction: CardinalDirection,
     graph: &CellGraph,
-    room_map: &RoomMap,
     visible: &mut HashSet<CellId>,
 ) {
     let mut current = origin;

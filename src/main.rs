@@ -329,6 +329,16 @@ fn setup_rooms(
     let room_1_id = room_map.create_room(random_room_color(&mut rng));
     let room_2_id = room_map.create_room(random_room_color(&mut rng));
     let room_3_id = room_map.create_room(random_room_color(&mut rng));
+    // Rooms 4-7: non-Euclidean spiral attached to Room 0's west wall.
+    // The spiral has a 2-cell entry corridor then three loops that coil
+    // on top of each other over the same 4 world-space positions.
+    let room_4_id = room_map.create_room(random_room_color(&mut rng));
+    let room_5_id = room_map.create_room(random_room_color(&mut rng));
+    let room_6_id = room_map.create_room(random_room_color(&mut rng));
+    let room_7_id = room_map.create_room(random_room_color(&mut rng));
+    // Room 8: single-room spiral — same 3-loop clockwise structure as Rooms 5-7
+    // but ALL cells belong to one room, so the engine sees it as one connected space.
+    let room_8_id = room_map.create_room(random_room_color(&mut rng));
 
     // Room 0: 2x2 square (player starts here at 0,0,0)
     let r0c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
@@ -386,6 +396,110 @@ fn setup_rooms(
     room_map.assign_cell(r3c3, room_3_id);
     room_map.assign_cell(r3c4, room_3_id);
 
+    // Room 4: 2-cell entry corridor heading west from r0c0.
+    //   sp_c0 at (-1, 0)   sp_c1 at (-2, 0)
+    let sp_c0 = graph.add_cell(Vec3::new(-cell_size, 0.0, 0.0));
+    let sp_c1 = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, 0.0));
+    graph.connect_cells(sp_c0, CardinalDirection::West, sp_c1);
+    room_map.assign_cell(sp_c0, room_4_id);
+    room_map.assign_cell(sp_c1, room_4_id);
+
+    // Rooms 5-7: three spiral loops, each a 4-cell clockwise rectangle
+    // (North → East → South → West) that coils back over the same two
+    // world positions as the entry corridor.  Because each loop is its
+    // own room the visibility system sees each coil as a separate space.
+    //
+    // World layout (2 × 2 block, shared by all three loops):
+    //   (-2, -1) --- (-1, -1)
+    //      |               |
+    //   (-2,  0) --- (-1,  0)  ← also sp_c0 / sp_c1 positions
+    //
+    // Loop 1 (Room 5): enters from sp_c1 going North.
+    let s1_a = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, -cell_size));       // (-2, -1)
+    let s1_b = graph.add_cell(Vec3::new(-cell_size,       0.0, -cell_size));       // (-1, -1)
+    let s1_c = graph.add_cell(Vec3::new(-cell_size,       0.0,  0.0));             // (-1,  0) overlaps sp_c0
+    graph.connect_cells(s1_a, CardinalDirection::East,  s1_b);
+    graph.connect_cells(s1_b, CardinalDirection::South, s1_c);
+    room_map.assign_cell(s1_a, room_5_id);
+    room_map.assign_cell(s1_b, room_5_id);
+    room_map.assign_cell(s1_c, room_5_id);
+
+    // Loop 2 (Room 6): enters from s1_c going West.
+    let s2_a = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  0.0));            // (-2,  0) overlaps sp_c1
+    let s2_b = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, -cell_size));      // (-2, -1) overlaps s1_a
+    let s2_c = graph.add_cell(Vec3::new(-cell_size,       0.0, -cell_size));      // (-1, -1) overlaps s1_b
+    let s2_d = graph.add_cell(Vec3::new(-cell_size,       0.0,  0.0));            // (-1,  0) overlaps s1_c / sp_c0
+    graph.connect_cells(s2_a, CardinalDirection::North, s2_b);
+    graph.connect_cells(s2_b, CardinalDirection::East,  s2_c);
+    graph.connect_cells(s2_c, CardinalDirection::South, s2_d);
+    room_map.assign_cell(s2_a, room_6_id);
+    room_map.assign_cell(s2_b, room_6_id);
+    room_map.assign_cell(s2_c, room_6_id);
+    room_map.assign_cell(s2_d, room_6_id);
+
+    // Loop 3 (Room 7): enters from s2_d going West. Dead end.
+    let s3_a = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  0.0));            // (-2,  0) overlaps sp_c1 / s2_a
+    let s3_b = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, -cell_size));      // (-2, -1) overlaps s1_a / s2_b
+    let s3_c = graph.add_cell(Vec3::new(-cell_size,       0.0, -cell_size));      // (-1, -1) overlaps s1_b / s2_c
+    let s3_d = graph.add_cell(Vec3::new(-cell_size,       0.0,  0.0));            // (-1,  0) overlaps all above; dead end
+    graph.connect_cells(s3_a, CardinalDirection::North, s3_b);
+    graph.connect_cells(s3_b, CardinalDirection::East,  s3_c);
+    graph.connect_cells(s3_c, CardinalDirection::South, s3_d);
+    room_map.assign_cell(s3_a, room_7_id);
+    room_map.assign_cell(s3_b, room_7_id);
+    room_map.assign_cell(s3_c, room_7_id);
+    room_map.assign_cell(s3_d, room_7_id);
+
+    // Room 8: single-room spiral south of Room 4's entry corridor.
+    // Entry: sp_c0 South → sr_c0 at (-1, 0, +1).
+    // Three clockwise loops (W → S → E → N) over the same 4 world positions:
+    //   (-1, +1)  (-2, +1)
+    //   (-1, +2)  (-2, +2)
+    // Because all cells share one room, the visibility system treats the whole
+    // spiral as one continuous space — compare with the multi-room spiral above.
+
+    // Loop 1
+    let sr_c0  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size));       // (-1, +1)
+    let sr_c1  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size));       // (-2, +1)
+    let sr_c2  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size * 2.0));// (-2, +2)
+    let sr_c3  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size * 2.0));// (-1, +2)
+    graph.connect_cells(sr_c0, CardinalDirection::West,  sr_c1);
+    graph.connect_cells(sr_c1, CardinalDirection::South, sr_c2);
+    graph.connect_cells(sr_c2, CardinalDirection::East,  sr_c3);
+
+    // Loop 2 — overlaps loop 1's positions
+    let sr_c4  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size));       // overlaps sr_c0
+    let sr_c5  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size));       // overlaps sr_c1
+    let sr_c6  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size * 2.0));// overlaps sr_c2
+    let sr_c7  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size * 2.0));// overlaps sr_c3
+    graph.connect_cells(sr_c3, CardinalDirection::North, sr_c4);
+    graph.connect_cells(sr_c4, CardinalDirection::West,  sr_c5);
+    graph.connect_cells(sr_c5, CardinalDirection::South, sr_c6);
+    graph.connect_cells(sr_c6, CardinalDirection::East,  sr_c7);
+
+    // Loop 3 — overlaps both previous loops; sr_c11 is a dead end
+    let sr_c8  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size));       // overlaps sr_c0/sr_c4
+    let sr_c9  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size));       // overlaps sr_c1/sr_c5
+    let sr_c10 = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size * 2.0));// overlaps sr_c2/sr_c6
+    let sr_c11 = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size * 2.0));// dead end
+    graph.connect_cells(sr_c7, CardinalDirection::North, sr_c8);
+    graph.connect_cells(sr_c8, CardinalDirection::West,  sr_c9);
+    graph.connect_cells(sr_c9, CardinalDirection::South, sr_c10);
+    graph.connect_cells(sr_c10, CardinalDirection::East, sr_c11);
+
+    room_map.assign_cell(sr_c0,  room_8_id);
+    room_map.assign_cell(sr_c1,  room_8_id);
+    room_map.assign_cell(sr_c2,  room_8_id);
+    room_map.assign_cell(sr_c3,  room_8_id);
+    room_map.assign_cell(sr_c4,  room_8_id);
+    room_map.assign_cell(sr_c5,  room_8_id);
+    room_map.assign_cell(sr_c6,  room_8_id);
+    room_map.assign_cell(sr_c7,  room_8_id);
+    room_map.assign_cell(sr_c8,  room_8_id);
+    room_map.assign_cell(sr_c9,  room_8_id);
+    room_map.assign_cell(sr_c10, room_8_id);
+    room_map.assign_cell(sr_c11, room_8_id);
+
     // Connect rooms via edge cells (both in the graph and in the room map)
     // Room 0 north edge -> Room 1 south edge
     graph.connect_cells(r0c2, CardinalDirection::North, r1c0);
@@ -398,6 +512,26 @@ fn setup_rooms(
     // Room 0 south edge -> Room 3 north edge (exit)
     graph.connect_cells(r0c0, CardinalDirection::South, r3c0);
     room_map.connect_rooms(room_0_id, r0c0, CardinalDirection::South, room_3_id, r3c0);
+
+    // Room 0 west edge -> Room 4 spiral entry
+    graph.connect_cells(r0c0, CardinalDirection::West, sp_c0);
+    room_map.connect_rooms(room_0_id, r0c0, CardinalDirection::West, room_4_id, sp_c0);
+
+    // Room 4 -> Room 5 (loop 1): sp_c1 north
+    graph.connect_cells(sp_c1, CardinalDirection::North, s1_a);
+    room_map.connect_rooms(room_4_id, sp_c1, CardinalDirection::North, room_5_id, s1_a);
+
+    // Room 5 -> Room 6 (loop 2): s1_c west
+    graph.connect_cells(s1_c, CardinalDirection::West, s2_a);
+    room_map.connect_rooms(room_5_id, s1_c, CardinalDirection::West, room_6_id, s2_a);
+
+    // Room 6 -> Room 7 (loop 3): s2_d west
+    graph.connect_cells(s2_d, CardinalDirection::West, s3_a);
+    room_map.connect_rooms(room_6_id, s2_d, CardinalDirection::West, room_7_id, s3_a);
+
+    // Room 4 -> Room 8 (single-room spiral): sp_c0 south
+    graph.connect_cells(sp_c0, CardinalDirection::South, sr_c0);
+    room_map.connect_rooms(room_4_id, sp_c0, CardinalDirection::South, room_8_id, sr_c0);
 
     // Spawn a point light in each cell
     for cell in graph.cells() {
