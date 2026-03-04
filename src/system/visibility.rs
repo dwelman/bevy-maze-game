@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::map::wall::{CellDoorway, CellWall};
-use crate::map::{CellGraph, CellId, CardinalDirection};
+use crate::map::{CellGraph, CellId, CardinalDirection, RoomMap};
 use crate::system::movement::{CellTransform, TargetCell, TargetFacing};
 
 /// Tracks which cells are currently visible to the player based on
@@ -26,6 +26,7 @@ impl VisibleCells {
 pub fn update_visible_cells(
     player_query: Query<(&CellTransform, &TargetCell, &TargetFacing)>,
     graph: Res<CellGraph>,
+    room_map: Res<RoomMap>,
     mut visible: ResMut<VisibleCells>,
     mut last_state: Local<Option<(CellId, CardinalDirection, bool)>>,
 ) {
@@ -47,11 +48,15 @@ pub fn update_visible_cells(
         // During movement/rotation, keep previously visible cells and add the
         // destination's visibility on top. This prevents cells from flickering
         // out mid-transition (e.g. when moving backwards).
-        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+        compute_visible_cells(effective_cell, effective_facing, &graph, &room_map, &mut visible.cells);
     } else {
         // Idle — clear and recompute from scratch so stale cells are pruned.
         visible.cells.clear();
-        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+        compute_visible_cells(effective_cell, effective_facing, &graph, &room_map, &mut visible.cells);
+    }
+
+    if let Some(player_room) = room_map.get_cell_room(effective_cell) {
+        prune_overlapping_cells(&mut visible.cells, player_room, &graph, &room_map);
     }
 }
 
@@ -92,6 +97,7 @@ fn compute_visible_cells(
     origin: CellId,
     facing: CardinalDirection,
     graph: &CellGraph,
+    room_map: &RoomMap,
     visible: &mut HashSet<CellId>,
 ) {
     visible.insert(origin);
@@ -101,9 +107,9 @@ fn compute_visible_cells(
     let right = facing.turn_right();
     let backward = facing.opposite();
 
-    cast_ray_with_perpendiculars(origin, forward, backward, graph, visible);
-    cast_ray_with_perpendiculars(origin, left, backward, graph, visible);
-    cast_ray_with_perpendiculars(origin, right, backward, graph, visible);
+    cast_ray_with_perpendiculars(origin, forward, backward, graph, room_map, visible);
+    cast_ray_with_perpendiculars(origin, left, backward, graph, room_map, visible);
+    cast_ray_with_perpendiculars(origin, right, backward, graph, room_map, visible);
 }
 
 /// Walks from `origin` in `ray_direction` through cell connections until
@@ -114,6 +120,7 @@ fn cast_ray_with_perpendiculars(
     ray_direction: CardinalDirection,
     backward: CardinalDirection,
     graph: &CellGraph,
+    room_map: &RoomMap,
     visible: &mut HashSet<CellId>,
 ) {
     let perp_left = ray_direction.turn_left();
@@ -122,10 +129,10 @@ fn cast_ray_with_perpendiculars(
     // Expand perpendiculars from the origin cell for this ray,
     // but never cast a perpendicular ray in the backward direction.
     if perp_left != backward {
-        cast_ray(origin, perp_left, graph, visible);
+        cast_ray(origin, perp_left, graph, room_map, visible);
     }
     if perp_right != backward {
-        cast_ray(origin, perp_right, graph, visible);
+        cast_ray(origin, perp_right, graph, room_map, visible);
     }
 
     // Walk the ray.
@@ -139,23 +146,38 @@ fn cast_ray_with_perpendiculars(
         };
 
         visible.insert(next_id);
-        if perp_left != backward {
-            cast_ray(next_id, perp_left, graph, visible);
-        }
-        if perp_right != backward {
-            cast_ray(next_id, perp_right, graph, visible);
+
+        // The cell immediately past a doorway acts as a 1-cell aperture:
+        // perpendicular expansion is suppressed there so you can't see
+        // sideways through a narrow opening.  This only applies when the
+        // main ray continues further — if the ray ends at this cell there
+        // is nothing to "look through", so perpendiculars open up normally.
+        let crossed_doorway = room_map.get_cell_room(current) != room_map.get_cell_room(next_id);
+        let ray_continues = graph.get_cell(next_id)
+            .and_then(|c| c.get_neighbor(ray_direction))
+            .is_some();
+        let suppress_perps = crossed_doorway && ray_continues;
+        if !suppress_perps {
+            if perp_left != backward {
+                cast_ray(next_id, perp_left, graph, room_map, visible);
+            }
+            if perp_right != backward {
+                cast_ray(next_id, perp_right, graph, room_map, visible);
+            }
         }
 
         current = next_id;
     }
 }
 
-/// Walks a straight line from `origin` in `direction` until hitting a wall,
-/// marking each cell as visible. Does not expand perpendiculars.
+/// Walks a straight line from `origin` in `direction` until hitting a wall
+/// or a doorway (room boundary), marking each cell as visible.
+/// Does not expand perpendiculars.
 fn cast_ray(
     origin: CellId,
     direction: CardinalDirection,
     graph: &CellGraph,
+    room_map: &RoomMap,
     visible: &mut HashSet<CellId>,
 ) {
     let mut current = origin;
@@ -168,7 +190,51 @@ fn cast_ray(
         };
 
         visible.insert(next_id);
+
         current = next_id;
+    }
+}
+
+/// When multiple visible cells share the same world-space position (non-Euclidean
+/// overlaps between rooms), keeps only the cell belonging to the player's current
+/// room and removes the others.
+fn prune_overlapping_cells(
+    visible: &mut HashSet<CellId>,
+    player_room: crate::map::RoomId,
+    graph: &CellGraph,
+    room_map: &RoomMap,
+) {
+    // Group visible cells by quantised position.
+    // Positions are exact multiples of cell_size so rounding is safe.
+    let mut by_position: HashMap<[i32; 3], Vec<CellId>> = HashMap::new();
+    for &cell_id in visible.iter() {
+        if let Some(cell) = graph.get_cell(cell_id) {
+            let p = cell.position();
+            let key = [
+                (p.x * 1000.0).round() as i32,
+                (p.y * 1000.0).round() as i32,
+                (p.z * 1000.0).round() as i32,
+            ];
+            by_position.entry(key).or_default().push(cell_id);
+        }
+    }
+
+    for cells in by_position.values() {
+        if cells.len() <= 1 {
+            continue;
+        }
+
+        let has_player_room_cell = cells.iter().any(|&cid| {
+            room_map.get_cell_room(cid) == Some(player_room)
+        });
+
+        if has_player_room_cell {
+            for &cell_id in cells {
+                if room_map.get_cell_room(cell_id) != Some(player_room) {
+                    visible.remove(&cell_id);
+                }
+            }
+        }
     }
 }
 
@@ -184,8 +250,9 @@ mod tests {
         origin: CellId,
         facing: CardinalDirection,
     ) -> HashSet<CellId> {
+        let room_map = RoomMap::new();
         let mut visible = HashSet::new();
-        compute_visible_cells(origin, facing, graph, &mut visible);
+        compute_visible_cells(origin, facing, graph, &room_map, &mut visible);
         visible
     }
 
