@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::math::IVec3;
 use std::collections::{HashMap, HashSet};
 
 use crate::map::wall::{CellDoorway, CellWall};
@@ -178,22 +179,12 @@ fn prune_overlapping_cells(
     graph: &CellGraph,
     room_map: &RoomMap,
 ) {
-    // Group visible cells by quantised position.
-    // Positions are exact multiples of cell_size so rounding is safe.
-    let mut by_position: HashMap<[i64; 3], Vec<CellId>> = HashMap::new();
-    let cell_size = graph.cell_size();
+    // Group visible cells by grid position.
+    // Cell positions are integer grid coordinates so they key directly.
+    let mut by_position: HashMap<IVec3, Vec<CellId>> = HashMap::new();
     for &cell_id in visible.iter() {
         if let Some(cell) = graph.get_cell(cell_id) {
-            let p = cell.position();
-            // Quantise using grid-space coordinates derived from the cell size,
-            // so bucketing is stable and aligned with the cell grid.
-            let grid_pos = p / cell_size;
-            let key = [
-                grid_pos.x.round() as i64,
-                grid_pos.y.round() as i64,
-                grid_pos.z.round() as i64,
-            ];
-            by_position.entry(key).or_default().push(cell_id);
+            by_position.entry(cell.position()).or_default().push(cell_id);
         }
     }
 
@@ -220,7 +211,7 @@ fn prune_overlapping_cells(
 mod tests {
     use super::*;
     use crate::map::{CellGraph, RoomMap};
-    use bevy::math::Vec3;
+    use bevy::math::IVec3;
     use bevy::prelude::Color;
 
     /// Helper: compute visibility and return the HashSet.
@@ -237,7 +228,7 @@ mod tests {
     #[test]
     fn isolated_cell_sees_only_self() {
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::ZERO);
+        let c0 = graph.add_cell(IVec3::ZERO);
         let vis = visible_from(&graph, c0, CardinalDirection::North);
         assert_eq!(vis, HashSet::from([c0]));
     }
@@ -245,9 +236,9 @@ mod tests {
     #[test]
     fn forward_ray_sees_straight_corridor() {
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c1 = graph.add_cell(Vec3::new(0.0, 0.0, -3.0));
-        let c2 = graph.add_cell(Vec3::new(0.0, 0.0, -6.0));
+        let c0 = graph.add_cell(IVec3::new(0, 0, 0));
+        let c1 = graph.add_cell(IVec3::new(0, 0, -1));
+        let c2 = graph.add_cell(IVec3::new(0, 0, -2));
         graph.connect_cells(c0, CardinalDirection::North, c1);
         graph.connect_cells(c1, CardinalDirection::North, c2);
 
@@ -263,10 +254,10 @@ mod tests {
         // Player at c0 facing North. Nothing behind is visible:
         // backward perpendiculars from the left/right rays are filtered out.
         let mut graph = CellGraph::new(3.0);
-        let c_behind2 = graph.add_cell(Vec3::new(0.0, 0.0, 6.0));
-        let c_behind = graph.add_cell(Vec3::new(0.0, 0.0, 3.0));
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c1 = graph.add_cell(Vec3::new(0.0, 0.0, -3.0));
+        let c_behind2 = graph.add_cell(IVec3::new(0, 0, 2));
+        let c_behind  = graph.add_cell(IVec3::new(0, 0, 1));
+        let c0        = graph.add_cell(IVec3::new(0, 0, 0));
+        let c1        = graph.add_cell(IVec3::new(0, 0, -1));
         graph.connect_cells(c_behind2, CardinalDirection::North, c_behind);
         graph.connect_cells(c_behind, CardinalDirection::North, c0);
         graph.connect_cells(c0, CardinalDirection::North, c1);
@@ -293,12 +284,12 @@ mod tests {
         // from those cells. c_far_right is deeper sideways and not directly
         // reachable by a forward-going ray, so it is not visible.
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c1 = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
-        let c2 = graph.add_cell(Vec3::new(6.0, 0.0, 0.0));
-        let c_left = graph.add_cell(Vec3::new(3.0, 0.0, -3.0));
-        let c_right = graph.add_cell(Vec3::new(3.0, 0.0, 3.0));
-        let c_far_right = graph.add_cell(Vec3::new(3.0, 0.0, 6.0));
+        let c0          = graph.add_cell(IVec3::new(0, 0, 0));
+        let c1          = graph.add_cell(IVec3::new(1, 0, 0));
+        let c2          = graph.add_cell(IVec3::new(2, 0, 0));
+        let c_left      = graph.add_cell(IVec3::new(1, 0, -1));
+        let c_right     = graph.add_cell(IVec3::new(1, 0, 1));
+        let c_far_right = graph.add_cell(IVec3::new(1, 0, 2));
 
         graph.connect_cells(c0, CardinalDirection::East, c1);
         graph.connect_cells(c1, CardinalDirection::East, c2);
@@ -323,9 +314,9 @@ mod tests {
         //    c_left -- c0 -- c_right
         // Player at c0 facing North.
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c_left = graph.add_cell(Vec3::new(-3.0, 0.0, 0.0));
-        let c_right = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
+        let c0      = graph.add_cell(IVec3::new(0, 0, 0));
+        let c_left  = graph.add_cell(IVec3::new(-1, 0, 0));
+        let c_right = graph.add_cell(IVec3::new(1, 0, 0));
         graph.connect_cells(c0, CardinalDirection::West, c_left);
         graph.connect_cells(c0, CardinalDirection::East, c_right);
 
@@ -346,10 +337,10 @@ mod tests {
         //           |
         //       c_left_south
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c_left = graph.add_cell(Vec3::new(-3.0, 0.0, 0.0));
-        let c_left_north = graph.add_cell(Vec3::new(-3.0, 0.0, -3.0));
-        let c_left_south = graph.add_cell(Vec3::new(-3.0, 0.0, 3.0));
+        let c0           = graph.add_cell(IVec3::new(0, 0, 0));
+        let c_left       = graph.add_cell(IVec3::new(-1, 0, 0));
+        let c_left_north = graph.add_cell(IVec3::new(-1, 0, -1));
+        let c_left_south = graph.add_cell(IVec3::new(-1, 0, 1));
 
         graph.connect_cells(c0, CardinalDirection::West, c_left);
         graph.connect_cells(c_left, CardinalDirection::North, c_left_north);
@@ -367,9 +358,9 @@ mod tests {
         // North to c2 and spawns a child ray going East from c2.
         // c3 is deeper North and not reached by a forward-going ray.
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c1 = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
-        let c2 = graph.add_cell(Vec3::new(3.0, 0.0, -3.0));
+        let c0 = graph.add_cell(IVec3::new(0, 0, 0));
+        let c1 = graph.add_cell(IVec3::new(1, 0, 0));
+        let c2 = graph.add_cell(IVec3::new(1, 0, -1));
 
         graph.connect_cells(c0, CardinalDirection::East, c1);
         graph.connect_cells(c1, CardinalDirection::North, c2);
@@ -379,7 +370,7 @@ mod tests {
         assert!(vis.contains(&c1));
         assert!(vis.contains(&c2), "one cell sideways from main ray");
 
-        let c3 = graph.add_cell(Vec3::new(3.0, 0.0, -6.0));
+        let c3 = graph.add_cell(IVec3::new(1, 0, -2));
         graph.connect_cells(c2, CardinalDirection::North, c3);
 
         let vis = visible_from(&graph, c0, CardinalDirection::East);
@@ -396,10 +387,10 @@ mod tests {
         // then spawns a child ray from c2 going East. That child ray reaches
         // c3 — this is the key behaviour for seeing through doorways.
         let mut graph = CellGraph::new(3.0);
-        let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-        let c1 = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
-        let c2 = graph.add_cell(Vec3::new(3.0, 0.0, -3.0));
-        let c3 = graph.add_cell(Vec3::new(6.0, 0.0, -3.0));
+        let c0 = graph.add_cell(IVec3::new(0, 0, 0));
+        let c1 = graph.add_cell(IVec3::new(1, 0, 0));
+        let c2 = graph.add_cell(IVec3::new(1, 0, -1));
+        let c3 = graph.add_cell(IVec3::new(2, 0, -1));
 
         graph.connect_cells(c0, CardinalDirection::East, c1);
         graph.connect_cells(c1, CardinalDirection::North, c2);
@@ -418,7 +409,7 @@ mod tests {
     /// Helper: build a minimal CellGraph + RoomMap, insert `cells` into both,
     /// run the pruner, and return the surviving visible set.
     fn run_prune(
-        positions: &[Vec3],          // world-space position for each cell (index = cell slot)
+        positions: &[IVec3],         // grid position for each cell (index = cell slot)
         room_assignments: &[usize],  // room index for each cell (parallel to positions)
         player_room_idx: usize,      // which room the player is in
     ) -> (Vec<CellId>, HashSet<CellId>) {
@@ -454,7 +445,7 @@ mod tests {
         // cell_a (room 0, player) and cell_b (room 1) sit at the same position.
         // After pruning, only cell_a survives.
         let (cells, visible) = run_prune(
-            &[Vec3::ZERO, Vec3::ZERO],
+            &[IVec3::ZERO, IVec3::ZERO],
             &[0, 1],
             0,
         );
@@ -467,7 +458,7 @@ mod tests {
         // cell_a (room 0, player) and cell_b (room 1) are at *different* positions.
         // Neither should be removed.
         let (cells, visible) = run_prune(
-            &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0)],
+            &[IVec3::new(0, 0, 0), IVec3::new(1, 0, 0)],
             &[0, 1],
             0,
         );
@@ -481,7 +472,7 @@ mod tests {
         // The pruner only removes when there IS a player-room cell in the cluster,
         // so both should be left untouched.
         let (cells, visible) = run_prune(
-            &[Vec3::ZERO, Vec3::ZERO],
+            &[IVec3::ZERO, IVec3::ZERO],
             &[1, 2],  // rooms 1 and 2; player is in room 0
             0,
         );
@@ -494,7 +485,7 @@ mod tests {
         // Three cells share a position: one in the player's room, two others.
         // Both non-player cells must be pruned.
         let (cells, visible) = run_prune(
-            &[Vec3::ZERO, Vec3::ZERO, Vec3::ZERO],
+            &[IVec3::ZERO, IVec3::ZERO, IVec3::ZERO],
             &[0, 1, 2],  // room 0 = player
             0,
         );
@@ -507,8 +498,8 @@ mod tests {
     fn prune_mixed_overlapping_and_unique_positions() {
         // cell_a (room 0, player) and cell_b (room 1) overlap.
         // cell_c (room 1) is at a unique position and must not be touched.
-        let pos_overlap = Vec3::new(6.0, 0.0, 0.0);
-        let pos_unique  = Vec3::new(9.0, 0.0, 0.0);
+        let pos_overlap = IVec3::new(2, 0, 0);
+        let pos_unique  = IVec3::new(3, 0, 0);
         let (cells, visible) = run_prune(
             &[pos_overlap, pos_overlap, pos_unique],
             &[0, 1, 1],

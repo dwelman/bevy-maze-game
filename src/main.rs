@@ -228,15 +228,15 @@ fn setup(
 ) {
     let eye_height = config.player.eye_height;
 
-    // Find the starting cell (cell at position 0,0,0)
+    // Find the starting cell (cell at grid position 0,0,0)
     let starting_cell = graph.cells()
         .find(|cell| {
             let pos = cell.position();
-            pos.x == 0.0 && pos.z == 0.0
+            pos.x == 0 && pos.z == 0
         })
         .expect("Starting cell not found");
 
-    let player_y = starting_cell.position().y;
+    let player_y = starting_cell.position().y as f32 * graph.cell_size();
     let floor_height = graph.get_cell_floor_height(starting_cell.id()).unwrap();
 
     // Player entity (parent) - handles movement, rotation, and collision
@@ -346,10 +346,10 @@ fn setup_rooms(
     let room_8_id = room_map.create_room(random_room_color(&mut rng));
 
     // Room 0: 2x2 square (player starts here at 0,0,0)
-    let r0c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
-    let r0c1 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0));
-    let r0c2 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size));
-    let r0c3 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size));
+    let r0c0 = graph.add_cell(IVec3::new(0, 0, 0));
+    let r0c1 = graph.add_cell(IVec3::new(1, 0, 0));
+    let r0c2 = graph.add_cell(IVec3::new(0, 0, -1));
+    let r0c3 = graph.add_cell(IVec3::new(1, 0, -1));
 
     graph.connect_cells(r0c0, CardinalDirection::East, r0c1);
     graph.connect_cells(r0c0, CardinalDirection::North, r0c2);
@@ -362,9 +362,9 @@ fn setup_rooms(
     room_map.assign_cell(r0c3, room_0_id);
 
     // Room 1: L-shaped corridor going north then east
-    let r1c0 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 2.0));
-    let r1c1 = graph.add_cell(Vec3::new(0.0, 0.0, -cell_size * 3.0));
-    let r1c2 = graph.add_cell(Vec3::new(cell_size, 0.0, -cell_size * 3.0));
+    let r1c0 = graph.add_cell(IVec3::new(0, 0, -2));
+    let r1c1 = graph.add_cell(IVec3::new(0, 0, -3));
+    let r1c2 = graph.add_cell(IVec3::new(1, 0, -3));
 
     graph.connect_cells(r1c0, CardinalDirection::North, r1c1);
     graph.connect_cells(r1c1, CardinalDirection::East, r1c2);
@@ -374,8 +374,8 @@ fn setup_rooms(
     room_map.assign_cell(r1c2, room_1_id);
 
     // Room 2: 2-cell corridor going north, east of room 0
-    let r2c0 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, 0.0));
-    let r2c1 = graph.add_cell(Vec3::new(cell_size * 2.0, 0.0, -cell_size));
+    let r2c0 = graph.add_cell(IVec3::new(2, 0, 0));
+    let r2c1 = graph.add_cell(IVec3::new(2, 0, -1));
 
     graph.connect_cells(r2c0, CardinalDirection::North, r2c1);
 
@@ -384,11 +384,11 @@ fn setup_rooms(
 
     // Room 3: U-shaped corridor looping south of room 0
     // r3c4 overlaps r0c1 in world space to test non-Euclidean visibility
-    let r3c0 = graph.add_cell(Vec3::new(0.0, 0.0, cell_size));
-    let r3c1 = graph.add_cell(Vec3::new(0.0, 0.0, cell_size * 2.0));
-    let r3c2 = graph.add_cell(Vec3::new(cell_size, 0.0, cell_size * 2.0));
-    let r3c3 = graph.add_cell(Vec3::new(cell_size, 0.0, cell_size));
-    let r3c4 = graph.add_cell(Vec3::new(cell_size, 0.0, 0.0)); // overlaps r0c1
+    let r3c0 = graph.add_cell(IVec3::new(0, 0, 1));
+    let r3c1 = graph.add_cell(IVec3::new(0, 0, 2));
+    let r3c2 = graph.add_cell(IVec3::new(1, 0, 2));
+    let r3c3 = graph.add_cell(IVec3::new(1, 0, 1));
+    let r3c4 = graph.add_cell(IVec3::new(1, 0, 0)); // overlaps r0c1
 
     graph.connect_cells(r3c0, CardinalDirection::South, r3c1);
     graph.connect_cells(r3c1, CardinalDirection::East, r3c2);
@@ -403,8 +403,8 @@ fn setup_rooms(
 
     // Room 4: 2-cell entry corridor heading west from r0c0.
     //   sp_c0 at (-1, 0)   sp_c1 at (-2, 0)
-    let sp_c0 = graph.add_cell(Vec3::new(-cell_size, 0.0, 0.0));
-    let sp_c1 = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, 0.0));
+    let sp_c0 = graph.add_cell(IVec3::new(-1, 0, 0));
+    let sp_c1 = graph.add_cell(IVec3::new(-2, 0, 0));
     graph.connect_cells(sp_c0, CardinalDirection::West, sp_c1);
     room_map.assign_cell(sp_c0, room_4_id);
     room_map.assign_cell(sp_c1, room_4_id);
@@ -420,9 +420,9 @@ fn setup_rooms(
     //   (-2,  0) --- (-1,  0)  ← also sp_c0 / sp_c1 positions
     //
     // Loop 1 (Room 5): enters from sp_c1 going North.
-    let s1_a = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, -cell_size));       // (-2, -1)
-    let s1_b = graph.add_cell(Vec3::new(-cell_size,       0.0, -cell_size));       // (-1, -1)
-    let s1_c = graph.add_cell(Vec3::new(-cell_size,       0.0,  0.0));             // (-1,  0) overlaps sp_c0
+    let s1_a = graph.add_cell(IVec3::new(-2, 0, -1));       // (-2, -1)
+    let s1_b = graph.add_cell(IVec3::new(-1, 0, -1));       // (-1, -1)
+    let s1_c = graph.add_cell(IVec3::new(-1, 0, 0));        // (-1,  0) overlaps sp_c0
     graph.connect_cells(s1_a, CardinalDirection::East,  s1_b);
     graph.connect_cells(s1_b, CardinalDirection::South, s1_c);
     room_map.assign_cell(s1_a, room_5_id);
@@ -430,10 +430,10 @@ fn setup_rooms(
     room_map.assign_cell(s1_c, room_5_id);
 
     // Loop 2 (Room 6): enters from s1_c going West.
-    let s2_a = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  0.0));            // (-2,  0) overlaps sp_c1
-    let s2_b = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, -cell_size));      // (-2, -1) overlaps s1_a
-    let s2_c = graph.add_cell(Vec3::new(-cell_size,       0.0, -cell_size));      // (-1, -1) overlaps s1_b
-    let s2_d = graph.add_cell(Vec3::new(-cell_size,       0.0,  0.0));            // (-1,  0) overlaps s1_c / sp_c0
+    let s2_a = graph.add_cell(IVec3::new(-2, 0, 0));             // (-2,  0) overlaps sp_c1
+    let s2_b = graph.add_cell(IVec3::new(-2, 0, -1));            // (-2, -1) overlaps s1_a
+    let s2_c = graph.add_cell(IVec3::new(-1, 0, -1));            // (-1, -1) overlaps s1_b
+    let s2_d = graph.add_cell(IVec3::new(-1, 0, 0));             // (-1,  0) overlaps s1_c / sp_c0
     graph.connect_cells(s2_a, CardinalDirection::North, s2_b);
     graph.connect_cells(s2_b, CardinalDirection::East,  s2_c);
     graph.connect_cells(s2_c, CardinalDirection::South, s2_d);
@@ -443,10 +443,10 @@ fn setup_rooms(
     room_map.assign_cell(s2_d, room_6_id);
 
     // Loop 3 (Room 7): enters from s2_d going West. Dead end.
-    let s3_a = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  0.0));            // (-2,  0) overlaps sp_c1 / s2_a
-    let s3_b = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0, -cell_size));      // (-2, -1) overlaps s1_a / s2_b
-    let s3_c = graph.add_cell(Vec3::new(-cell_size,       0.0, -cell_size));      // (-1, -1) overlaps s1_b / s2_c
-    let s3_d = graph.add_cell(Vec3::new(-cell_size,       0.0,  0.0));            // (-1,  0) overlaps all above; dead end
+    let s3_a = graph.add_cell(IVec3::new(-2, 0, 0));             // (-2,  0) overlaps sp_c1 / s2_a
+    let s3_b = graph.add_cell(IVec3::new(-2, 0, -1));            // (-2, -1) overlaps s1_a / s2_b
+    let s3_c = graph.add_cell(IVec3::new(-1, 0, -1));            // (-1, -1) overlaps s1_b / s2_c
+    let s3_d = graph.add_cell(IVec3::new(-1, 0, 0));             // (-1,  0) overlaps all above; dead end
     graph.connect_cells(s3_a, CardinalDirection::North, s3_b);
     graph.connect_cells(s3_b, CardinalDirection::East,  s3_c);
     graph.connect_cells(s3_c, CardinalDirection::South, s3_d);
@@ -464,29 +464,29 @@ fn setup_rooms(
     // spiral as one continuous space — compare with the multi-room spiral above.
 
     // Loop 1
-    let sr_c0  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size));       // (-1, +1)
-    let sr_c1  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size));       // (-2, +1)
-    let sr_c2  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size * 2.0));// (-2, +2)
-    let sr_c3  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size * 2.0));// (-1, +2)
+    let sr_c0  = graph.add_cell(IVec3::new(-1, 0, 1));        // (-1, +1)
+    let sr_c1  = graph.add_cell(IVec3::new(-2, 0, 1));        // (-2, +1)
+    let sr_c2  = graph.add_cell(IVec3::new(-2, 0, 2));        // (-2, +2)
+    let sr_c3  = graph.add_cell(IVec3::new(-1, 0, 2));        // (-1, +2)
     graph.connect_cells(sr_c0, CardinalDirection::West,  sr_c1);
     graph.connect_cells(sr_c1, CardinalDirection::South, sr_c2);
     graph.connect_cells(sr_c2, CardinalDirection::East,  sr_c3);
 
     // Loop 2 — overlaps loop 1's positions
-    let sr_c4  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size));       // overlaps sr_c0
-    let sr_c5  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size));       // overlaps sr_c1
-    let sr_c6  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size * 2.0));// overlaps sr_c2
-    let sr_c7  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size * 2.0));// overlaps sr_c3
+    let sr_c4  = graph.add_cell(IVec3::new(-1, 0, 1));        // overlaps sr_c0
+    let sr_c5  = graph.add_cell(IVec3::new(-2, 0, 1));        // overlaps sr_c1
+    let sr_c6  = graph.add_cell(IVec3::new(-2, 0, 2));        // overlaps sr_c2
+    let sr_c7  = graph.add_cell(IVec3::new(-1, 0, 2));        // overlaps sr_c3
     graph.connect_cells(sr_c3, CardinalDirection::North, sr_c4);
     graph.connect_cells(sr_c4, CardinalDirection::West,  sr_c5);
     graph.connect_cells(sr_c5, CardinalDirection::South, sr_c6);
     graph.connect_cells(sr_c6, CardinalDirection::East,  sr_c7);
 
     // Loop 3 — overlaps both previous loops; sr_c11 is a dead end
-    let sr_c8  = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size));       // overlaps sr_c0/sr_c4
-    let sr_c9  = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size));       // overlaps sr_c1/sr_c5
-    let sr_c10 = graph.add_cell(Vec3::new(-cell_size * 2.0, 0.0,  cell_size * 2.0));// overlaps sr_c2/sr_c6
-    let sr_c11 = graph.add_cell(Vec3::new(-cell_size,       0.0,  cell_size * 2.0));// dead end
+    let sr_c8  = graph.add_cell(IVec3::new(-1, 0, 1));        // overlaps sr_c0/sr_c4
+    let sr_c9  = graph.add_cell(IVec3::new(-2, 0, 1));        // overlaps sr_c1/sr_c5
+    let sr_c10 = graph.add_cell(IVec3::new(-2, 0, 2));        // overlaps sr_c2/sr_c6
+    let sr_c11 = graph.add_cell(IVec3::new(-1, 0, 2));        // dead end
     graph.connect_cells(sr_c7, CardinalDirection::North, sr_c8);
     graph.connect_cells(sr_c8, CardinalDirection::West,  sr_c9);
     graph.connect_cells(sr_c9, CardinalDirection::South, sr_c10);
@@ -540,7 +540,7 @@ fn setup_rooms(
 
     // Spawn a point light in each cell, linked via CellLight for visibility toggling
     for cell in graph.cells() {
-        let position = cell.position();
+        let position = cell.position().as_vec3() * cell_size;
         commands.spawn((
             PointLight {
                 shadows_enabled: true,
@@ -644,7 +644,7 @@ fn setup_goal_cell(
     let cell_size = graph.cell_size();
     let horizontal_directions = [CardinalDirection::North, CardinalDirection::South, CardinalDirection::East, CardinalDirection::West];
 
-    let candidates: Vec<(CellId, Vec3, CardinalDirection)> = graph.cells()
+    let candidates: Vec<(CellId, IVec3, CardinalDirection)> = graph.cells()
         .flat_map(|cell| {
             let id = cell.id();
             let pos = cell.position();
@@ -663,7 +663,7 @@ fn setup_goal_cell(
     let mut rng = rand::rng();
     let (parent_id, parent_pos, direction) = *candidates.choose(&mut rng).unwrap();
 
-    let new_pos = parent_pos + direction.to_vec3() * cell_size;
+    let new_pos = parent_pos + direction.to_ivec3();
     let goal_id = graph.add_cell(new_pos);
     graph.connect_cells(parent_id, direction, goal_id);
 
@@ -676,6 +676,7 @@ fn setup_goal_cell(
         room_map.connect_rooms(parent_room_id, parent_id, direction, exit_room_id, goal_id);
     }
 
+    let new_world_pos = new_pos.as_vec3() * cell_size;
     commands.spawn((
         PointLight {
             shadows_enabled: true,
@@ -683,7 +684,7 @@ fn setup_goal_cell(
             range: 10.0,
             ..default()
         },
-        Transform::from_xyz(new_pos.x, new_pos.y + cell_size / 2.0, new_pos.z),
+        Transform::from_xyz(new_world_pos.x, new_world_pos.y + cell_size / 2.0, new_world_pos.z),
         CellLight(goal_id),
         Visibility::Hidden,
     ));

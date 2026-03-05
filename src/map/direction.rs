@@ -1,4 +1,4 @@
-use bevy::math::{Quat, Vec3};
+use bevy::math::{IVec3, Quat, Vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CardinalDirection {
@@ -32,6 +32,18 @@ impl CardinalDirection {
             CardinalDirection::West => Vec3::new(-1.0, 0.0, 0.0),
             CardinalDirection::Zenith => Vec3::new(0.0, 1.0, 0.0),
             CardinalDirection::Nadir => Vec3::new(0.0, -1.0, 0.0),
+        }
+    }
+
+    /// Converts direction to an integer unit vector (grid step)
+    pub fn to_ivec3(self) -> IVec3 {
+        match self {
+            CardinalDirection::North => IVec3::new(0, 0, -1),
+            CardinalDirection::South => IVec3::new(0, 0, 1),
+            CardinalDirection::East => IVec3::new(1, 0, 0),
+            CardinalDirection::West => IVec3::new(-1, 0, 0),
+            CardinalDirection::Zenith => IVec3::new(0, 1, 0),
+            CardinalDirection::Nadir => IVec3::new(0, -1, 0),
         }
     }
 
