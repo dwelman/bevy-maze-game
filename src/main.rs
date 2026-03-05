@@ -203,6 +203,10 @@ fn main() {
 #[derive(Component)]
 struct DebugText;
 
+/// Links a point light entity to its cell so visibility can be toggled together.
+#[derive(Component)]
+pub struct CellLight(pub CellId);
+
 #[derive(Component)]
 struct WinText;
 
@@ -534,7 +538,7 @@ fn setup_rooms(
     graph.connect_cells(sp_c0, CardinalDirection::South, sr_c0);
     room_map.connect_rooms(room_4_id, sp_c0, CardinalDirection::South, room_8_id, sr_c0);
 
-    // Spawn a point light in each cell
+    // Spawn a point light in each cell, linked via CellLight for visibility toggling
     for cell in graph.cells() {
         let position = cell.position();
         commands.spawn((
@@ -545,6 +549,8 @@ fn setup_rooms(
                 ..default()
             },
             Transform::from_xyz(position.x, (position.y + (cell_size / 2.0)) - 0.2, position.z),
+            CellLight(cell.id()),
+            Visibility::Hidden,
         ));
     }
 }
@@ -678,6 +684,8 @@ fn setup_goal_cell(
             ..default()
         },
         Transform::from_xyz(new_pos.x, new_pos.y + cell_size / 2.0, new_pos.z),
+        CellLight(goal_id),
+        Visibility::Hidden,
     ));
 }
 

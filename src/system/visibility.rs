@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use crate::map::wall::{CellDoorway, CellWall};
 use crate::map::{CellGraph, CellId, CardinalDirection, RoomMap};
 use crate::system::movement::{CellTransform, TargetCell, TargetFacing};
-use crate::GameConfig;
+use crate::{CellLight, GameConfig};
 
 /// Tracks which cells are currently visible to the player based on
 /// topology-driven line-of-sight through the cell graph.
@@ -62,12 +62,14 @@ pub fn update_visible_cells(
     }
 }
 
-/// Sets `Visibility::Hidden` or `Visibility::Visible` on every `CellWall` and
-/// `CellDoorway` entity depending on whether its cell is in the visible set.
+/// Sets `Visibility::Hidden` or `Visibility::Visible` on every `CellWall`,
+/// `CellDoorway`, and `CellLight` entity depending on whether its cell is in
+/// the visible set.
 pub fn apply_cell_visibility(
     visible: Res<VisibleCells>,
     mut wall_query: Query<(&CellWall, &mut Visibility)>,
     mut doorway_query: Query<(&CellDoorway, &mut Visibility), Without<CellWall>>,
+    mut light_query: Query<(&CellLight, &mut Visibility), (Without<CellWall>, Without<CellDoorway>)>,
 ) {
     if !visible.is_changed() {
         return;
@@ -83,6 +85,14 @@ pub fn apply_cell_visibility(
 
     for (doorway, mut vis) in &mut doorway_query {
         *vis = if visible.contains(doorway.cell_id) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    for (light, mut vis) in &mut light_query {
+        *vis = if visible.contains(light.0) {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -170,14 +180,18 @@ fn prune_overlapping_cells(
 ) {
     // Group visible cells by quantised position.
     // Positions are exact multiples of cell_size so rounding is safe.
-    let mut by_position: HashMap<[i32; 3], Vec<CellId>> = HashMap::new();
+    let mut by_position: HashMap<[i64; 3], Vec<CellId>> = HashMap::new();
+    let cell_size = graph.cell_size();
     for &cell_id in visible.iter() {
         if let Some(cell) = graph.get_cell(cell_id) {
             let p = cell.position();
+            // Quantise using grid-space coordinates derived from the cell size,
+            // so bucketing is stable and aligned with the cell grid.
+            let grid_pos = p / cell_size;
             let key = [
-                (p.x * 1000.0).round() as i32,
-                (p.y * 1000.0).round() as i32,
-                (p.z * 1000.0).round() as i32,
+                grid_pos.x.round() as i64,
+                grid_pos.y.round() as i64,
+                grid_pos.z.round() as i64,
             ];
             by_position.entry(key).or_default().push(cell_id);
         }
@@ -205,8 +219,9 @@ fn prune_overlapping_cells(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::CellGraph;
+    use crate::map::{CellGraph, RoomMap};
     use bevy::math::Vec3;
+    use bevy::prelude::Color;
 
     /// Helper: compute visibility and return the HashSet.
     fn visible_from(
@@ -396,5 +411,111 @@ mod tests {
             vis.contains(&c3),
             "c3 is reached by a child ray from c2 going East"
         );
+    }
+
+    // ── prune_overlapping_cells ────────────────────────────────────────────
+
+    /// Helper: build a minimal CellGraph + RoomMap, insert `cells` into both,
+    /// run the pruner, and return the surviving visible set.
+    fn run_prune(
+        positions: &[Vec3],          // world-space position for each cell (index = cell slot)
+        room_assignments: &[usize],  // room index for each cell (parallel to positions)
+        player_room_idx: usize,      // which room the player is in
+    ) -> (Vec<CellId>, HashSet<CellId>) {
+        let mut graph = CellGraph::new(3.0);
+        let mut room_map = RoomMap::new();
+
+        // Create one room per distinct room index.
+        let max_room = room_assignments.iter().copied().max().unwrap_or(0);
+        let rooms: Vec<_> = (0..=max_room)
+            .map(|i| {
+                let t = i as f32 / (max_room + 1) as f32;
+                room_map.create_room(Color::srgb(t, 1.0 - t, 0.5))
+            })
+            .collect();
+
+        let cells: Vec<CellId> = positions
+            .iter()
+            .zip(room_assignments.iter())
+            .map(|(&pos, &room_idx)| {
+                let cell_id = graph.add_cell(pos);
+                room_map.assign_cell(cell_id, rooms[room_idx]);
+                cell_id
+            })
+            .collect();
+
+        let mut visible: HashSet<CellId> = cells.iter().copied().collect();
+        prune_overlapping_cells(&mut visible, rooms[player_room_idx], &graph, &room_map);
+        (cells, visible)
+    }
+
+    #[test]
+    fn prune_keeps_player_room_cell_removes_other() {
+        // cell_a (room 0, player) and cell_b (room 1) sit at the same position.
+        // After pruning, only cell_a survives.
+        let (cells, visible) = run_prune(
+            &[Vec3::ZERO, Vec3::ZERO],
+            &[0, 1],
+            0,
+        );
+        assert!(visible.contains(&cells[0]), "player-room cell must survive pruning");
+        assert!(!visible.contains(&cells[1]), "non-player-room cell at same position must be pruned");
+    }
+
+    #[test]
+    fn prune_does_not_touch_non_overlapping_cells() {
+        // cell_a (room 0, player) and cell_b (room 1) are at *different* positions.
+        // Neither should be removed.
+        let (cells, visible) = run_prune(
+            &[Vec3::new(0.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0)],
+            &[0, 1],
+            0,
+        );
+        assert!(visible.contains(&cells[0]), "player-room cell must be kept");
+        assert!(visible.contains(&cells[1]), "non-overlapping foreign cell must be kept");
+    }
+
+    #[test]
+    fn prune_no_player_room_cell_in_cluster_keeps_all() {
+        // Two cells share a position, but neither belongs to the player's room.
+        // The pruner only removes when there IS a player-room cell in the cluster,
+        // so both should be left untouched.
+        let (cells, visible) = run_prune(
+            &[Vec3::ZERO, Vec3::ZERO],
+            &[1, 2],  // rooms 1 and 2; player is in room 0
+            0,
+        );
+        assert!(visible.contains(&cells[0]), "cell in room 1 must not be pruned");
+        assert!(visible.contains(&cells[1]), "cell in room 2 must not be pruned");
+    }
+
+    #[test]
+    fn prune_removes_multiple_non_player_cells_at_same_position() {
+        // Three cells share a position: one in the player's room, two others.
+        // Both non-player cells must be pruned.
+        let (cells, visible) = run_prune(
+            &[Vec3::ZERO, Vec3::ZERO, Vec3::ZERO],
+            &[0, 1, 2],  // room 0 = player
+            0,
+        );
+        assert!(visible.contains(&cells[0]), "player-room cell must survive");
+        assert!(!visible.contains(&cells[1]), "first non-player cell must be pruned");
+        assert!(!visible.contains(&cells[2]), "second non-player cell must be pruned");
+    }
+
+    #[test]
+    fn prune_mixed_overlapping_and_unique_positions() {
+        // cell_a (room 0, player) and cell_b (room 1) overlap.
+        // cell_c (room 1) is at a unique position and must not be touched.
+        let pos_overlap = Vec3::new(6.0, 0.0, 0.0);
+        let pos_unique  = Vec3::new(9.0, 0.0, 0.0);
+        let (cells, visible) = run_prune(
+            &[pos_overlap, pos_overlap, pos_unique],
+            &[0, 1, 1],
+            0,
+        );
+        assert!(visible.contains(&cells[0]), "overlapping player-room cell must survive");
+        assert!(!visible.contains(&cells[1]), "overlapping non-player cell must be pruned");
+        assert!(visible.contains(&cells[2]), "non-overlapping foreign cell must be kept");
     }
 }
