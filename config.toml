@@ -54,3 +54,6 @@ log_level = "debug"
 [world]
 # Size of each cell in world units
 cell_size = 3.0
+
+# Maximum number of steps a ray can take before stopping
+render_depth = 20

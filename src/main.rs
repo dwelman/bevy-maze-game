@@ -67,6 +67,7 @@ pub struct DebugConfig {
 #[derive(Deserialize, Clone)]
 pub struct WorldConfig {
     pub cell_size: f32,
+    pub render_depth: u32,
 }
 
 #[derive(Deserialize, Clone)]

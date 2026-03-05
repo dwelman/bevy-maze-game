@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use crate::map::wall::{CellDoorway, CellWall};
 use crate::map::{CellGraph, CellId, CardinalDirection, RoomMap};
 use crate::system::movement::{CellTransform, TargetCell, TargetFacing};
+use crate::GameConfig;
 
 /// Tracks which cells are currently visible to the player based on
 /// topology-driven line-of-sight through the cell graph.
@@ -27,6 +28,7 @@ pub fn update_visible_cells(
     player_query: Query<(&CellTransform, &TargetCell, &TargetFacing)>,
     graph: Res<CellGraph>,
     room_map: Res<RoomMap>,
+    config: Res<GameConfig>,
     mut visible: ResMut<VisibleCells>,
     mut last_state: Local<Option<(CellId, CardinalDirection, bool)>>,
 ) {
@@ -48,11 +50,11 @@ pub fn update_visible_cells(
         // During movement/rotation, keep previously visible cells and add the
         // destination's visibility on top. This prevents cells from flickering
         // out mid-transition (e.g. when moving backwards).
-        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells, config.world.render_depth);
     } else {
         // Idle — clear and recompute from scratch so stale cells are pruned.
         visible.cells.clear();
-        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
+        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells, config.world.render_depth);
     }
 
     if let Some(player_room) = room_map.get_cell_room(effective_cell) {
@@ -88,8 +90,6 @@ pub fn apply_cell_visibility(
     }
 }
 
-/// Maximum number of steps a ray can take before stopping.
-const RENDER_DEPTH: u32 = 20;
 
 /// Populates `visible` with every CellId the player can see from `origin`
 /// facing `facing`.
@@ -103,11 +103,12 @@ fn compute_visible_cells(
     facing: CardinalDirection,
     graph: &CellGraph,
     visible: &mut HashSet<CellId>,
+    render_depth: u32,
 ) {
     visible.insert(origin);
-    cast_ray(origin, facing, RENDER_DEPTH, graph, visible);
-    cast_ray(origin, facing.turn_left(), RENDER_DEPTH, graph, visible);
-    cast_ray(origin, facing.turn_right(), RENDER_DEPTH, graph, visible);
+    cast_ray(origin, facing, render_depth, graph, visible);
+    cast_ray(origin, facing.turn_left(), render_depth, graph, visible);
+    cast_ray(origin, facing.turn_right(), render_depth, graph, visible);
 }
 
 /// Walks from `origin` in `direction` up to `depth` steps. At every new cell,
@@ -214,7 +215,7 @@ mod tests {
         facing: CardinalDirection,
     ) -> HashSet<CellId> {
         let mut visible = HashSet::new();
-        compute_visible_cells(origin, facing, graph, &mut visible);
+        compute_visible_cells(origin, facing, graph, &mut visible, 10);
         visible
     }
 
