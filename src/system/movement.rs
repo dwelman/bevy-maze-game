@@ -9,6 +9,17 @@ pub enum MovementState {
     MovingToTarget,
 }
 
+/// The cell an entity is moving towards. Set when movement begins, cleared on
+/// arrival. Shared between systems (e.g. movement and visibility) so they
+/// don't depend on each other directly.
+#[derive(Component, Default)]
+pub struct TargetCell(pub Option<CellId>);
+
+/// The cardinal direction an entity is rotating towards. Set when rotation
+/// begins, cleared on arrival. Mirrors [`TargetCell`] for facing changes.
+#[derive(Component, Default)]
+pub struct TargetFacing(pub Option<CardinalDirection>);
+
 #[derive(Component)]
 pub struct LerpMovement {
     /// The current state of movement
@@ -21,8 +32,6 @@ pub struct LerpMovement {
     pub start_position: Vec3,
     /// Current lerp progress from 0.0 to 1.0
     pub lerp_progress: f32,
-    /// Cell ID the entity is moving towards; committed to CellTransform on arrival.
-    pub pending_cell: Option<CellId>,
 }
 
 #[derive(Component)]
@@ -68,12 +77,12 @@ pub fn update_cell_movement(
     time: Res<Time>,
     config: Res<GameConfig>,
     cell_graph: Res<CellGraph>,
-    mut query: Query<(&mut Transform, &mut LerpMovement, &mut CellTransform)>,
+    mut query: Query<(&mut Transform, &mut LerpMovement, &mut CellTransform, &mut TargetCell)>,
 ) {
     let lerp_speed = config.player.lerp_speed;
     let delta_time = time.delta_secs();
 
-    for (mut transform, mut lerp_mov, mut cell_tf) in &mut query {
+    for (mut transform, mut lerp_mov, mut cell_tf, mut target_cell) in &mut query {
         match lerp_mov.state {
             MovementState::Idle => {
                 if lerp_mov.movement_delta == Vec3::ZERO {
@@ -113,7 +122,7 @@ pub fn update_cell_movement(
                 let neighbor_pos = neighbor_cell.position();
                 let target = Vec3::new(neighbor_pos.x, start.y, neighbor_pos.z);
 
-                lerp_mov.pending_cell = Some(neighbor_id);
+                target_cell.0 = Some(neighbor_id);
                 lerp_mov.start_position = start;
                 lerp_mov.target_position = target;
                 lerp_mov.lerp_progress = 0.0;
@@ -130,7 +139,7 @@ pub fn update_cell_movement(
                 }
                 if lerp_mov.lerp_progress >= 1.0 {
                     transform.translation = lerp_mov.target_position;
-                    if let Some(arrived_cell) = lerp_mov.pending_cell.take() {
+                    if let Some(arrived_cell) = target_cell.0.take() {
                         cell_tf.cell = arrived_cell;
                     }
                     lerp_mov.state = MovementState::Idle;
@@ -241,13 +250,23 @@ pub fn handle_player_input(
 pub fn update_lerp_rotation(
     time: Res<Time>,
     config: Res<GameConfig>,
-    mut query: Query<(&mut Transform, &mut LerpRotation, Option<&mut CellTransform>)>,
+    mut query: Query<(&mut Transform, &mut LerpRotation, Option<&mut CellTransform>, Option<&mut TargetFacing>)>,
 ) {
     let rotation_lerp_speed = config.player.rotation_lerp_speed;
     let delta_time = time.delta_secs();
 
-    for (mut transform, mut rot, cell_tf) in &mut query {
+    for (mut transform, mut rot, cell_tf, mut target_facing) in &mut query {
         if rot.rotation_delta != 0.0 && rot.lerp_progress >= 1.0 {
+            // Compute and publish the target facing before the lerp begins.
+            if let (Some(cell_tf), Some(target_facing)) = (&cell_tf, target_facing.as_mut()) {
+                let new_facing = if rot.rotation_delta > 0.0 {
+                    cell_tf.facing.turn_left()
+                } else {
+                    cell_tf.facing.turn_right()
+                };
+                target_facing.0 = Some(new_facing);
+            }
+
             rot.target_rotation = transform.rotation * Quat::from_rotation_y(rot.rotation_delta);
             rot.lerp_progress = 0.0;
             rot.rotation_delta = 0.0;
@@ -273,6 +292,9 @@ pub fn update_lerp_rotation(
                     if world_fwd.z >= 0.0 { CardinalDirection::South } else { CardinalDirection::North }
                 };
                 cell_tf.facing = new_facing;
+            }
+            if let Some(mut target_facing) = target_facing {
+                target_facing.0 = None;
             }
         }
     }
