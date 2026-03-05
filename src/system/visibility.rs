@@ -48,11 +48,11 @@ pub fn update_visible_cells(
         // During movement/rotation, keep previously visible cells and add the
         // destination's visibility on top. This prevents cells from flickering
         // out mid-transition (e.g. when moving backwards).
-        compute_visible_cells(effective_cell, effective_facing, &graph, &room_map, &mut visible.cells);
+        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
     } else {
         // Idle — clear and recompute from scratch so stale cells are pruned.
         visible.cells.clear();
-        compute_visible_cells(effective_cell, effective_facing, &graph, &room_map, &mut visible.cells);
+        compute_visible_cells(effective_cell, effective_facing, &graph, &mut visible.cells);
     }
 
     if let Some(player_room) = room_map.get_cell_room(effective_cell) {
@@ -88,98 +88,49 @@ pub fn apply_cell_visibility(
     }
 }
 
+/// Maximum number of steps a ray can take before stopping.
+const RENDER_DEPTH: u32 = 20;
+
 /// Populates `visible` with every CellId the player can see from `origin`
 /// facing `facing`.
 ///
-/// Casts three rays (forward, left, right) and expands one cell in each
-/// perpendicular direction at every cell along each ray.
+/// Spawns three rays (forward, left, right). Each ray marches in its
+/// direction and, at every step, spawns child rays from the left and right
+/// neighbour cells going in the same direction. This recursive expansion
+/// naturally handles corners and doorways without special-case logic.
 fn compute_visible_cells(
     origin: CellId,
     facing: CardinalDirection,
     graph: &CellGraph,
-    room_map: &RoomMap,
     visible: &mut HashSet<CellId>,
 ) {
     visible.insert(origin);
-
-    let forward = facing;
-    let left = facing.turn_left();
-    let right = facing.turn_right();
-    let backward = facing.opposite();
-
-    cast_ray_with_perpendiculars(origin, forward, backward, graph, room_map, visible);
-    cast_ray_with_perpendiculars(origin, left, backward, graph, room_map, visible);
-    cast_ray_with_perpendiculars(origin, right, backward, graph, room_map, visible);
+    cast_ray(origin, facing, RENDER_DEPTH, graph, visible);
+    cast_ray(origin, facing.turn_left(), RENDER_DEPTH, graph, visible);
+    cast_ray(origin, facing.turn_right(), RENDER_DEPTH, graph, visible);
 }
 
-/// Walks from `origin` in `ray_direction` through cell connections until
-/// hitting a wall. For every cell on the ray (including the origin), adds
-/// the cell and casts a full perpendicular ray in each perpendicular direction.
-fn cast_ray_with_perpendiculars(
-    origin: CellId,
-    ray_direction: CardinalDirection,
-    backward: CardinalDirection,
-    graph: &CellGraph,
-    room_map: &RoomMap,
-    visible: &mut HashSet<CellId>,
-) {
-    let perp_left = ray_direction.turn_left();
-    let perp_right = ray_direction.turn_right();
-
-    // Expand perpendiculars from the origin cell for this ray,
-    // but never cast a perpendicular ray in the backward direction.
-    if perp_left != backward {
-        cast_ray(origin, perp_left, graph, visible);
-    }
-    if perp_right != backward {
-        cast_ray(origin, perp_right, graph, visible);
-    }
-
-    // Walk the ray.
-    let mut current = origin;
-    loop {
-        let Some(cell) = graph.get_cell(current) else {
-            break;
-        };
-        let Some(next_id) = cell.get_neighbor(ray_direction) else {
-            break;
-        };
-
-        visible.insert(next_id);
-
-        // The cell immediately past a doorway acts as a 1-cell aperture:
-        // perpendicular expansion is suppressed there so you can't see
-        // sideways through a narrow opening.  This only applies when the
-        // main ray continues further — if the ray ends at this cell there
-        // is nothing to "look through", so perpendiculars open up normally.
-        let crossed_doorway = room_map.get_cell_room(current) != room_map.get_cell_room(next_id);
-        let ray_continues = graph.get_cell(next_id)
-            .and_then(|c| c.get_neighbor(ray_direction))
-            .is_some();
-        let suppress_perps = crossed_doorway && ray_continues;
-        if !suppress_perps {
-            if perp_left != backward {
-                cast_ray(next_id, perp_left, graph, visible);
-            }
-            if perp_right != backward {
-                cast_ray(next_id, perp_right, graph, visible);
-            }
-        }
-
-        current = next_id;
-    }
-}
-
-/// Walks a straight line from `origin` in `direction` until hitting a wall,
-/// marking each cell as visible. Does not expand perpendiculars.
+/// Walks from `origin` in `direction` up to `depth` steps. At every new cell,
+/// spawns child rays from the left and right neighbours (going in the same
+/// `direction`), then continues forward. The child rays recurse with
+/// decremented depth, so the visible region fans out naturally.
 fn cast_ray(
     origin: CellId,
     direction: CardinalDirection,
+    depth: u32,
     graph: &CellGraph,
     visible: &mut HashSet<CellId>,
 ) {
+    let left = direction.turn_left();
+    let right = direction.turn_right();
+
     let mut current = origin;
+    let mut remaining = depth;
+
     loop {
+        if remaining == 0 {
+            break;
+        }
         let Some(cell) = graph.get_cell(current) else {
             break;
         };
@@ -188,6 +139,20 @@ fn cast_ray(
         };
 
         visible.insert(next_id);
+        remaining -= 1;
+
+        // Spawn child rays from the left/right neighbours of this cell,
+        // each continuing in the same forward direction.
+        if let Some(next_cell) = graph.get_cell(next_id) {
+            if let Some(left_id) = next_cell.get_neighbor(left) {
+                visible.insert(left_id);
+                cast_ray(left_id, direction, remaining, graph, visible);
+            }
+            if let Some(right_id) = next_cell.get_neighbor(right) {
+                visible.insert(right_id);
+                cast_ray(right_id, direction, remaining, graph, visible);
+            }
+        }
 
         current = next_id;
     }
@@ -248,9 +213,8 @@ mod tests {
         origin: CellId,
         facing: CardinalDirection,
     ) -> HashSet<CellId> {
-        let room_map = RoomMap::new();
         let mut visible = HashSet::new();
-        compute_visible_cells(origin, facing, graph, &room_map, &mut visible);
+        compute_visible_cells(origin, facing, graph, &mut visible);
         visible
     }
 
@@ -299,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn perpendicular_rays_extend_fully() {
+    fn perpendicular_expansion_one_cell_then_forward() {
         //       c_left
         //         |
         // c0 -- c1 -- c2 (forward = East)
@@ -308,8 +272,10 @@ mod tests {
         //         |
         //       c_far_right
         //
-        // Perpendicular rays from c1 now walk the full line,
-        // so c_far_right IS visible (straight South from c1).
+        // The forward ray reaches c1/c2. At c1 it peeks one cell left (c_left)
+        // and one cell right (c_right), then spawns forward-going child rays
+        // from those cells. c_far_right is deeper sideways and not directly
+        // reachable by a forward-going ray, so it is not visible.
         let mut graph = CellGraph::new(3.0);
         let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
         let c1 = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
@@ -331,8 +297,8 @@ mod tests {
         assert!(vis.contains(&c_left));
         assert!(vis.contains(&c_right));
         assert!(
-            vis.contains(&c_far_right),
-            "perpendicular ray should extend fully, not just 1 cell"
+            !vis.contains(&c_far_right),
+            "deep sideways corridors are covered by the initial left/right rays, not the forward ray's expansion"
         );
     }
 
@@ -354,16 +320,15 @@ mod tests {
     }
 
     #[test]
-    fn left_ray_perpendicular_skips_backward() {
+    fn left_ray_expands_both_sides() {
         // Player at c0 facing North. Left ray goes West.
-        // Perpendiculars of the West ray are North and South.
-        // South is the backward direction, so it's filtered out.
+        // At c_left, it expands North and South (no backward filtering).
         //
         //       c_left_north
         //           |
         //  c_left -- c0     (player faces North)
         //           |
-        //       c_left_south  (NOT visible — backward perp filtered)
+        //       c_left_south
         let mut graph = CellGraph::new(3.0);
         let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
         let c_left = graph.add_cell(Vec3::new(-3.0, 0.0, 0.0));
@@ -375,15 +340,16 @@ mod tests {
         graph.connect_cells(c_left, CardinalDirection::South, c_left_south);
 
         let vis = visible_from(&graph, c0, CardinalDirection::North);
-        assert!(vis.contains(&c_left_north), "forward perp from left ray should be visible");
-        assert!(!vis.contains(&c_left_south), "backward perp from left ray should be filtered");
+        assert!(vis.contains(&c_left_north), "left ray expansion north");
+        assert!(vis.contains(&c_left_south), "left ray expansion south");
     }
 
     #[test]
-    fn perpendicular_ray_sees_side_corridor() {
+    fn side_corridor_one_cell_visible() {
         // L-shaped corridor: c0 --East--> c1 --North--> c2 --North--> c3
-        // Player at c0 facing East. The perpendicular ray from c1 goes North,
-        // so c2 and c3 are both visible (full perpendicular ray).
+        // Player at c0 facing East. The forward ray at c1 peeks one cell
+        // North to c2 and spawns a child ray going East from c2.
+        // c3 is deeper North and not reached by a forward-going ray.
         let mut graph = CellGraph::new(3.0);
         let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
         let c1 = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
@@ -395,24 +361,24 @@ mod tests {
         let vis = visible_from(&graph, c0, CardinalDirection::East);
         assert!(vis.contains(&c0));
         assert!(vis.contains(&c1));
-        assert!(vis.contains(&c2));
+        assert!(vis.contains(&c2), "one cell sideways from main ray");
 
         let c3 = graph.add_cell(Vec3::new(3.0, 0.0, -6.0));
         graph.connect_cells(c2, CardinalDirection::North, c3);
 
         let vis = visible_from(&graph, c0, CardinalDirection::East);
         assert!(
-            vis.contains(&c3),
-            "perpendicular ray should see full side corridor"
+            !vis.contains(&c3),
+            "deeper sideways cells are not reached by forward-going child rays"
         );
     }
 
     #[test]
-    fn perpendicular_does_not_recurse_further() {
-        // c0 --East--> c1 --North(perp)--> c2 --East--> c3
-        // Player at c0 facing East. c2 is on a perpendicular ray from c1.
-        // c3 is East of c2, but perpendicular rays don't spawn their own
-        // perpendiculars, so c3 should NOT be visible.
+    fn child_ray_continues_forward_from_side_cell() {
+        // c0 --East--> c1 --North(side)--> c2 --East--> c3
+        // Player at c0 facing East. The forward ray at c1 peeks North to c2,
+        // then spawns a child ray from c2 going East. That child ray reaches
+        // c3 — this is the key behaviour for seeing through doorways.
         let mut graph = CellGraph::new(3.0);
         let c0 = graph.add_cell(Vec3::new(0.0, 0.0, 0.0));
         let c1 = graph.add_cell(Vec3::new(3.0, 0.0, 0.0));
@@ -424,10 +390,10 @@ mod tests {
         graph.connect_cells(c2, CardinalDirection::East, c3);
 
         let vis = visible_from(&graph, c0, CardinalDirection::East);
-        assert!(vis.contains(&c2), "c2 is on perpendicular ray");
+        assert!(vis.contains(&c2), "c2 is one cell sideways from main ray");
         assert!(
-            !vis.contains(&c3),
-            "c3 is off the perpendicular ray — requires a second turn"
+            vis.contains(&c3),
+            "c3 is reached by a child ray from c2 going East"
         );
     }
 }
