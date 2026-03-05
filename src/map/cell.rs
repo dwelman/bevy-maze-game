@@ -1,4 +1,4 @@
-use bevy::math::Vec3;
+use bevy::math::IVec3;
 use std::collections::HashMap;
 
 use crate::map::CardinalDirection;
@@ -9,13 +9,13 @@ pub struct CellId(pub u32);
 #[derive(Debug)]
 pub struct Cell {
     id: CellId,
-    position: Vec3,
+    position: IVec3,
     connections: HashMap<CardinalDirection, CellId>,
 }
 
 impl Cell {
-    /// Creates a new cell at the given position
-    pub fn new(id: CellId, position: Vec3) -> Self {
+    /// Creates a new cell at the given grid position
+    pub fn new(id: CellId, position: IVec3) -> Self {
         Self {
             id,
             position,
@@ -28,8 +28,8 @@ impl Cell {
         self.id
     }
 
-    /// Returns the cell's position in world space
-    pub fn position(&self) -> Vec3 {
+    /// Returns the cell's position in grid coordinates
+    pub fn position(&self) -> IVec3 {
         self.position
     }
 
@@ -66,22 +66,22 @@ impl Cell {
 mod tests {
     use super::*;
 
-    fn make_cell(id: u32, x: f32, y: f32, z: f32) -> Cell {
-        Cell::new(CellId(id), Vec3::new(x, y, z))
+    fn make_cell(id: u32, x: i32, y: i32, z: i32) -> Cell {
+        Cell::new(CellId(id), IVec3::new(x, y, z))
     }
 
     // --- Cell::new / id / position ---
 
     #[test]
     fn new_stores_id_and_position() {
-        let cell = make_cell(1, 1.0, 2.0, 3.0);
+        let cell = make_cell(1, 1, 2, 3);
         assert_eq!(cell.id(), CellId(1));
-        assert_eq!(cell.position(), Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(cell.position(), IVec3::new(1, 2, 3));
     }
 
     #[test]
     fn new_starts_with_no_connections() {
-        let cell = make_cell(1, 0.0, 0.0, 0.0);
+        let cell = make_cell(1, 0, 0, 0);
         for dir in CardinalDirection::all() {
             assert!(!cell.has_neighbor(dir));
         }
@@ -89,56 +89,56 @@ mod tests {
 
     #[test]
     fn new_zero_position() {
-        let cell = make_cell(0, 0.0, 0.0, 0.0);
-        assert_eq!(cell.position(), Vec3::ZERO);
+        let cell = make_cell(0, 0, 0, 0);
+        assert_eq!(cell.position(), IVec3::ZERO);
     }
 
     #[test]
     fn new_negative_position() {
-        let cell = make_cell(5, -10.0, -20.0, -30.0);
-        assert_eq!(cell.position(), Vec3::new(-10.0, -20.0, -30.0));
+        let cell = make_cell(5, -10, -20, -30);
+        assert_eq!(cell.position(), IVec3::new(-10, -20, -30));
     }
 
     // --- Cell::id ---
 
     #[test]
     fn id_returns_correct_value() {
-        let cell = make_cell(42, 0.0, 0.0, 0.0);
+        let cell = make_cell(42, 0, 0, 0);
         assert_eq!(cell.id(), CellId(42));
     }
 
     #[test]
     fn id_zero() {
-        let cell = make_cell(0, 0.0, 0.0, 0.0);
+        let cell = make_cell(0, 0, 0, 0);
         assert_eq!(cell.id(), CellId(0));
     }
 
     #[test]
     fn id_max_u32() {
-        let cell = Cell::new(CellId(u32::MAX), Vec3::ZERO);
+        let cell = Cell::new(CellId(u32::MAX), IVec3::ZERO);
         assert_eq!(cell.id(), CellId(u32::MAX));
     }
 
     // --- Cell::position ---
 
     #[test]
-    fn position_returns_correct_vec3() {
-        let cell = make_cell(1, 5.5, -3.0, 0.25);
-        assert_eq!(cell.position(), Vec3::new(5.5, -3.0, 0.25));
+    fn position_returns_correct_ivec3() {
+        let cell = make_cell(1, 5, -3, 0);
+        assert_eq!(cell.position(), IVec3::new(5, -3, 0));
     }
 
     // --- Cell::connect ---
 
     #[test]
     fn connect_creates_neighbor() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::North, CellId(2));
         assert_eq!(cell.get_neighbor(CardinalDirection::North), Some(CellId(2)));
     }
 
     #[test]
     fn connect_overwrites_existing_neighbor() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::North, CellId(2));
         cell.connect(CardinalDirection::North, CellId(99));
         assert_eq!(cell.get_neighbor(CardinalDirection::North), Some(CellId(99)));
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn connect_all_directions() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         let neighbors = [
             (CardinalDirection::North, CellId(2)),
             (CardinalDirection::South, CellId(3)),
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn disconnect_returns_previous_neighbor() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::South, CellId(10));
         let removed = cell.disconnect(CardinalDirection::South);
         assert_eq!(removed, Some(CellId(10)));
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn disconnect_removes_connection() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::South, CellId(10));
         cell.disconnect(CardinalDirection::South);
         assert!(!cell.has_neighbor(CardinalDirection::South));
@@ -183,14 +183,14 @@ mod tests {
 
     #[test]
     fn disconnect_empty_direction_returns_none() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         let removed = cell.disconnect(CardinalDirection::East);
         assert_eq!(removed, None);
     }
 
     #[test]
     fn disconnect_then_reconnect() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::West, CellId(5));
         cell.disconnect(CardinalDirection::West);
         cell.connect(CardinalDirection::West, CellId(99));
@@ -201,20 +201,20 @@ mod tests {
 
     #[test]
     fn get_neighbor_returns_some_when_connected() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::Zenith, CellId(8));
         assert_eq!(cell.get_neighbor(CardinalDirection::Zenith), Some(CellId(8)));
     }
 
     #[test]
     fn get_neighbor_returns_none_when_unconnected() {
-        let cell = make_cell(1, 0.0, 0.0, 0.0);
+        let cell = make_cell(1, 0, 0, 0);
         assert_eq!(cell.get_neighbor(CardinalDirection::Nadir), None);
     }
 
     #[test]
     fn get_neighbor_unaffected_by_other_directions() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::North, CellId(2));
         assert_eq!(cell.get_neighbor(CardinalDirection::South), None);
         assert_eq!(cell.get_neighbor(CardinalDirection::East), None);
@@ -224,20 +224,20 @@ mod tests {
 
     #[test]
     fn has_neighbor_true_when_connected() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::East, CellId(3));
         assert!(cell.has_neighbor(CardinalDirection::East));
     }
 
     #[test]
     fn has_neighbor_false_when_not_connected() {
-        let cell = make_cell(1, 0.0, 0.0, 0.0);
+        let cell = make_cell(1, 0, 0, 0);
         assert!(!cell.has_neighbor(CardinalDirection::West));
     }
 
     #[test]
     fn has_neighbor_false_after_disconnect() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::Zenith, CellId(6));
         cell.disconnect(CardinalDirection::Zenith);
         assert!(!cell.has_neighbor(CardinalDirection::Zenith));
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn boundary_faces_all_directions_when_no_connections() {
-        let cell = make_cell(1, 0.0, 0.0, 0.0);
+        let cell = make_cell(1, 0, 0, 0);
         let faces: std::collections::HashSet<CardinalDirection> = cell.boundary_faces().into_iter().collect();
         let expected: std::collections::HashSet<CardinalDirection> = CardinalDirection::all().into_iter().collect();
         assert_eq!(faces, expected);
@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn boundary_faces_excludes_connected_directions() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         cell.connect(CardinalDirection::North, CellId(2));
         cell.connect(CardinalDirection::East, CellId(3));
         let faces = cell.boundary_faces();
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn boundary_faces_empty_when_all_connected() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         for (i, dir) in CardinalDirection::all().into_iter().enumerate() {
             cell.connect(dir, CellId(i as u32 + 2));
         }
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn boundary_faces_updates_after_disconnect() {
-        let mut cell = make_cell(1, 0.0, 0.0, 0.0);
+        let mut cell = make_cell(1, 0, 0, 0);
         for (i, dir) in CardinalDirection::all().into_iter().enumerate() {
             cell.connect(dir, CellId(i as u32 + 2));
         }

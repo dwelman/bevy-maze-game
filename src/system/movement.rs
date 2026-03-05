@@ -119,7 +119,7 @@ pub fn update_cell_movement(
                 };
 
                 let start = transform.translation;
-                let neighbor_pos = neighbor_cell.position();
+                let neighbor_pos = neighbor_cell.position().as_vec3() * cell_graph.cell_size();
                 let target = Vec3::new(neighbor_pos.x, start.y, neighbor_pos.z);
 
                 target_cell.0 = Some(neighbor_id);

@@ -55,7 +55,7 @@ pub fn spawn_cell_walls(
     });
 
     for cell in graph.cells() {
-        let cell_position = cell.position();
+        let cell_position = cell.position().as_vec3() * cell_size;
         let cell_id = cell.id();
 
         let material = if goal_cell.0 == Some(cell_id) {

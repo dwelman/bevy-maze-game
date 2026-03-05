@@ -1,5 +1,5 @@
 use bevy::prelude::Resource;
-use bevy::math::Vec3;
+use bevy::math::IVec3;
 use std::collections::HashMap;
 
 use crate::map::{Cell, CellId, CardinalDirection};
@@ -26,8 +26,8 @@ impl CellGraph {
         self.cell_size
     }
 
-    /// Adds a new cell at the given position and returns its ID
-    pub fn add_cell(&mut self, position: Vec3) -> CellId {
+    /// Adds a new cell at the given grid position and returns its ID
+    pub fn add_cell(&mut self, position: IVec3) -> CellId {
         let id = CellId(self.next_id);
         self.next_id += 1;
 
@@ -118,7 +118,7 @@ impl CellGraph {
     /// Returns the floor height (bottom Y coordinate) for a given cell
     pub fn get_cell_floor_height(&self, cell_id: CellId) -> Option<f32> {
         self.cells.get(&cell_id).map(|cell| {
-            cell.position().y - self.cell_size / 2.0
+            cell.position().y as f32 * self.cell_size - self.cell_size / 2.0
         })
     }
 }
