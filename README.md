@@ -1,6 +1,8 @@
 # Bevy Maze Game
 
-A grid-based maze game built with Bevy.
+A grid-based maze game built with Bevy. 
+
+Functionally deprecated - I wanted to play around with Rust and Bevy and I have acheived that goal, there is some advanced rendering I would like to do that Bevy and its implementation of wgpu don't support out the box. My goal isn't to dive deeply into shaders at this time so I am moving on to try a different engine.
 
 ## Running the Game
 
